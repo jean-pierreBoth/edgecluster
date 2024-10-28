@@ -1,1 +1,13 @@
-/target
+target/**
+Runs/**
+Results/**
+Tmp/**
+Cargo.lock
+rls*
+*.pdf
+*.html
+*.csv
+*.png
+*.bson
+.idea/
+*.log
