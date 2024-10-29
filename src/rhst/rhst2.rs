@@ -73,6 +73,11 @@ impl Space {
             layer_max,
         }
     }
+    /// returns cell diameter at layer l
+    pub fn get_cell_diam(&self, l: usize) -> f64 {
+        panic!("not yet implemented");
+    }
+
     /// return space dimension
     pub fn get_dim(&self) -> usize {
         self.dim
@@ -88,7 +93,7 @@ impl Space {
     }
 
     /// return coordinate of a cell for a point at layer l layer 0 is at finer scale
-    pub fn get_cell<T: Float>(self, p: Vec<T>, l: usize) -> Vec<usize> {
+    pub fn get_cell<T: Float>(&self, p: &[T], l: usize) -> Cell {
         let exp: u32 = (self.layer_max - l).try_into().unwrap();
         let cell_size = self.width / 2usize.pow(exp) as f64;
         let mut coordinates = Vec::<usize>::with_capacity(self.dim);
@@ -96,7 +101,11 @@ impl Space {
             let idx: usize = ((p[d].to_f64().unwrap() - self.xmin) / cell_size).trunc() as usize;
             coordinates.push(idx);
         }
-        coordinates
+        Cell {
+            space: &self,
+            layer: l,
+            position: coordinates,
+        }
     }
 } // end of impl Space
 
@@ -220,17 +229,16 @@ impl<'a, T> Tree<'a, T>
 where
     T: Float,
 {
-    pub fn new(points: Vec<Point<T>>) -> Self {
-        panic!("not yet implemented");
-    }
-    /// returns cell diameter at layer l
-    pub fn get_cell_diam(&self, l: usize) -> f64 {
+    pub fn new(points: Vec<Point<T>>, mindist: f64) -> Self {
+        // determine space,
+        // allocate benefits, root node, layers
+        // sample rshift
         panic!("not yet implemented");
     }
 
     // return indices of cell at cells
-    fn get_cell_at_layer(&self, point: &[T], layer: usize) -> Vec<usize> {
-        panic!("not yet implemented");
+    fn get_cell_at_layer(&'a self, point: &[T], layer: usize) -> Cell<'a> {
+        self.space.get_cell(point, layer)
     }
 
     /// insert a set of points and do clusterization
