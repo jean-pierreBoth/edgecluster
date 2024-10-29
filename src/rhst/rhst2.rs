@@ -72,6 +72,15 @@ impl Space {
             layer_max,
         }
     }
+    /// return space dimension
+    pub fn get_dim(&self) -> usize {
+        self.dim
+    }
+    /// return space width
+    pub fn get_width(&self) -> f64 {
+        self.width
+    }
+
     /// return coordinate of a cell for a point at layer l layer 0 is at finer scale
     pub fn get_cell<T: Float>(self, p: Vec<T>, l: usize) -> Vec<usize> {
         let exp: u32 = (self.layer_max - l).try_into().unwrap();
@@ -127,6 +136,15 @@ struct Layer<T: Float> {
 }
 
 impl<T: Float> Layer<T> {
+    //
+    fn new(space: Space, layer: usize) -> Self {
+        let nodes = Vec::<Node<T>>::new();
+        let hnodes: DashMap<Vec<usize>, usize> = DashMap::new();
+        let cell_diameter = (space.get_width() * space.get_dim() as f64).sqrt();
+
+        //
+        panic!("not yet implemented");
+    }
     //
     fn insert(&self, point: &Point<T>) {
         panic!("not yet implemented");
