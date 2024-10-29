@@ -10,9 +10,10 @@ use dashmap::DashMap;
 type NodeId = usize;
 type PointId = usize;
 
-struct Point<T: Float> {
+pub(crate) struct Point<T: Float> {
     // id to identify points
     id: PointId,
+    // data point
     p: Vec<T>,
     /// original label
     label: u32,
@@ -81,6 +82,11 @@ impl Space {
         self.width
     }
 
+    /// returns maximum layer , or layer of root node
+    pub fn get_root_layer(&self) -> usize {
+        self.layer_max
+    }
+
     /// return coordinate of a cell for a point at layer l layer 0 is at finer scale
     pub fn get_cell<T: Float>(self, p: Vec<T>, l: usize) -> Vec<usize> {
         let exp: u32 = (self.layer_max - l).try_into().unwrap();
@@ -94,28 +100,55 @@ impl Space {
     }
 } // end of impl Space
 
+/// space is split in cells , at upper layer  there is one cell for the whole space
+/// at layer 0 cells have size corresponding to mindit
+#[derive(Debug, Clone)]
+pub struct Cell<'a> {
+    space: &'a Space,
+    // we must know one' layer
+    layer: usize,
+    /// a vector of dimension d, giving center of cell
+    position: Vec<usize>,
+}
+
+impl<'a> Cell<'a> {
+    pub fn new(space: &'a Space, layer: usize, position: &[usize]) -> Self {
+        Cell {
+            space,
+            layer,
+            position: Vec::from(position),
+        }
+    }
+}
 // a node correspond to cubic cell mesh at scale depending on layer.
 // a node must keep track of points in it (excluding those in children)
 // at the end of subdivision process only leaves have a list of point
-pub struct Node<T: Float> {
+pub struct Node<'a> {
     id: NodeId,
-    // we must know one' layer
-    layer: usize,
-    /// a vector of dimension d
-    position: Vec<usize>,
+    // corresponding cell
+    cell: Cell<'a>,
     // coordinates in the layer
     parent: Option<NodeId>,
     //
     children: Option<Vec<NodeId>>,
-    // value of an upper edge
-    up_edge_value: T,
     //
     points: Option<Vec<PointId>>,
 }
 
-impl<T: Float> Node<T> {
+impl<'a> Node<'a> {
     //
-    fn insert(&mut self, point: Point<T>) {
+
+    fn new(id: NodeId, cell: Cell<'a>, parent: Option<NodeId>) -> Self {
+        Node {
+            id,
+            cell,
+            parent,
+            children: None,
+            points: None,
+        }
+    }
+    //
+    fn insert<T: Float>(&mut self, point: Point<T>) {
         panic!("not yet implemented")
     }
 } // end of impl Node
@@ -123,30 +156,34 @@ impl<T: Float> Node<T> {
 //======
 
 /// a layer gathers nodes if a given layer.
-struct Layer<T: Float> {
+struct Layer<'a> {
     space: Space,
     // my layer
     layer: usize,
     //
-    cell_diameter: T,
+    cell_diameter: f64,
     // nodes in layer
-    nodes: Vec<Node<T>>,
+    nodes: Vec<Node<'a>>,
     // hashmap to index in nodes
     hnodes: DashMap<Vec<usize>, usize>,
 }
 
-impl<T: Float> Layer<T> {
+impl<'a> Layer<'a> {
     //
     fn new(space: Space, layer: usize) -> Self {
-        let nodes = Vec::<Node<T>>::new();
+        let nodes = Vec::<Node>::new();
         let hnodes: DashMap<Vec<usize>, usize> = DashMap::new();
         let cell_diameter = (space.get_width() * space.get_dim() as f64).sqrt();
-
-        //
-        panic!("not yet implemented");
+        Layer {
+            space,
+            layer,
+            cell_diameter,
+            nodes,
+            hnodes,
+        }
     }
     //
-    fn insert(&self, point: &Point<T>) {
+    fn insert<T: Float>(&self, point: &Point<T>) {
         panic!("not yet implemented");
     }
 }
@@ -165,25 +202,25 @@ impl<T: Float> Layer<T> {
 //
 
 //
-pub struct Tree<T: Float> {
+pub(crate) struct Tree<'a, T: Float> {
     points: Vec<Point<T>>,
     // benefit of each points. For
     benefits: Vec<Vec<T>>,
     // space description
     space: Space,
     // largest coordinate value
-    root: Node<T>,
+    root: Node<'a>,
     // nodes indexed by their id
-    layers: Vec<Layer<T>>,
+    layers: Vec<Layer<'a>>,
     // random shift
     rshift: [T; 3],
 }
 
-impl<T> Tree<T>
+impl<'a, T> Tree<'a, T>
 where
     T: Float,
 {
-    pub fn new(space: Space) -> Self {
+    pub fn new(points: Vec<Point<T>>) -> Self {
         panic!("not yet implemented");
     }
     /// returns cell diameter at layer l
@@ -191,13 +228,14 @@ where
         panic!("not yet implemented");
     }
 
+    // return indices of cell at cells
     fn get_cell_at_layer(&self, point: &[T], layer: usize) -> Vec<usize> {
         panic!("not yet implemented");
     }
 
-    /// insert a point
-    pub fn insert(&mut self, point: &[T]) {
-        panic!("not yet implemented");
+    /// insert a set of points and do clusterization
+    pub fn cluster_set(&mut self, points: &[Vec<T>]) -> anyhow::Result<()> {
+        panic!("not yet implemented")
     }
 
     /// generate random shift
