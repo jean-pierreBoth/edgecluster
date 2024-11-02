@@ -1,12 +1,13 @@
 //! This is a small rhst implementation as described in cohen-addad paper
-//! It requires data to have small/moderated dimension. A first step can be dimension reduction
+//! It requires data to have small/moderated dimension. This can be achieved using a first step of dimension reduction
+//! via random projections or an embedding via the crate [annembed](https://crates.io/crates/annembed)
 //!
 #![allow(clippy::needless_range_loop)]
 
 // We prefer rhst over cover trees as described in
 //  TerraPattern: A Nearest Neighbor Search Service (2019)
 //  Zaheer, Guruganesh, Levin Smola
-//  as we can group points very close (under lower distance threshold)
+//  as we can group points very close (under lower distance threshold) in one cell
 
 use num_traits::cast::*;
 use num_traits::float::Float;
@@ -15,6 +16,7 @@ use std::fmt::Debug;
 
 use dashmap::{mapref::one, DashMap};
 use ego_tree::{tree, NodeMut, Tree};
+use std::collections::HashMap;
 
 type NodeId = usize;
 
@@ -27,7 +29,7 @@ pub type PointId = usize;
 pub struct Point<T> {
     // id to identify points as coming from external client
     id: PointId,
-    // data point
+    /// data point
     p: Vec<T>,
     /// original label
     label: u32,
@@ -37,10 +39,15 @@ impl<T> Point<T>
 where
     T: Float + Debug,
 {
+    pub fn new(id: PointId, p: Vec<T>, label: u32) -> Self {
+        Point { id, p, label }
+    }
+    /// get the original label
     pub fn get_label(&self) -> u32 {
         self.label
     }
 
+    /// gets the points coordinate
     pub fn get_position(&self) -> &[T] {
         &self.p
     }
@@ -88,7 +95,7 @@ impl Space {
         self.xmin
     }
 
-    pub fn get_cell_center(&self, layer: usize, index: &[usize]) -> Vec<f64> {
+    pub fn get_cell_center(&self, layer: u32, index: &[u32]) -> Vec<f64> {
         panic!("not yet implemented");
     }
 }
@@ -99,12 +106,12 @@ impl Space {
 /// at layer 0 cells have size corresponding to mindist, so a cell, even at layer 0 can have more than one point
 /// (they must be lesst than mindist apart)
 #[derive(Debug, Clone)]
-pub struct Cell<'a, T> {
+pub(crate) struct Cell<'a, T> {
     space: &'a Space,
     // we must know one' layer
-    layer: usize,
+    layer: u32,
     /// a vector of dimension d, giving center of cell in the mesh coordinates
-    index: Vec<usize>,
+    index: Vec<u32>,
     //
     points_in: Option<Vec<&'a Point<T>>>,
 }
@@ -113,7 +120,7 @@ impl<'a, T> Cell<'a, T>
 where
     T: Float + Debug,
 {
-    pub fn new(space: &'a Space, layer: usize, index: Vec<usize>) -> Self {
+    pub fn new(space: &'a Space, layer: u32, index: Vec<u32>) -> Self {
         Cell {
             space,
             layer,
@@ -131,7 +138,7 @@ where
         }
     } // end of get_cell_weight
 
-    fn get_cell_index(&self) -> &[usize] {
+    fn get_cell_index(&self) -> &[u32] {
         &self.index
     }
 
@@ -140,8 +147,7 @@ where
         match self.points_in.as_mut() {
             Some(points) => points.push(point),
             None => {
-                let mut vec = Vec::new();
-                vec.push(point);
+                let mut vec = vec![point];
                 self.points_in = Some(vec);
             }
         }
@@ -154,13 +160,16 @@ where
     }
 
     // This function parse points and allocate a subcell when a point requires it.
-    fn split_cell(&self) {
-        if self.points_in.is_none() {
-            return;
-        }
+    fn split(&self) -> Option<Vec<Cell<T>>> {
+        assert!(self.layer > 0);
+        self.points_in.as_ref()?; /* return in case of None */
+        //
+        let mut new_cells: Vec<Cell<T>> = Vec::new();
+        let mut hashed_cells: HashMap<Vec<u32>, Cell<T>> = HashMap::new();
+        //
         for point in self.points_in.as_ref().unwrap() {
             let xyz = point.get_position();
-            let mut split_index = Vec::<usize>::with_capacity(self.space.get_dim());
+            let mut split_index = Vec::<u32>::with_capacity(self.space.get_dim());
             let cell_center = self.space.get_cell_center(self.layer, &self.index);
             for i in 0..xyz.len() {
                 if xyz[i].to_f64().unwrap() > cell_center[i] {
@@ -171,8 +180,22 @@ where
                     split_index.push(2 * self.index[i]);
                 }
             }
+            // must  we must allocate a new cell at lower(!) layer
+            if let Some(cell) = hashed_cells.get_mut(&split_index) {
+                cell.add_point(point);
+            } else {
+                let new_cell: Cell<T> = Cell::new(self.space, self.layer - 1, split_index.clone());
+                hashed_cells.insert(split_index.clone(), new_cell);
+            }
         }
-        panic!("not yet implemented");
+        //
+        log::debug!(
+            "cell with nb points {:?} splitted in {:?} new cells",
+            self.points_in.as_ref().unwrap().len(),
+            hashed_cells.len()
+        );
+        //
+        Some(new_cells)
     }
 } // end of impl Cell
 
@@ -182,11 +205,11 @@ where
 struct Layer<'a, T> {
     space: Space,
     // my layer
-    layer: usize,
+    layer: u32,
     //
     cell_diameter: f64,
     // hashmap to index in nodes
-    cells: DashMap<Vec<usize>, Cell<'a, T>>,
+    hcells: DashMap<Vec<u32>, Cell<'a, T>>,
 }
 
 impl<'a, T> Layer<'a, T>
@@ -194,28 +217,35 @@ where
     T: Float + Debug,
 {
     //
-    fn new(space: Space, layer: usize, cell_diameter: f64) -> Self {
-        let cells: DashMap<Vec<usize>, Cell<T>> = DashMap::new();
+    fn new(space: Space, layer: u32, cell_diameter: f64) -> Self {
+        let hcells: DashMap<Vec<u32>, Cell<T>> = DashMap::new();
         Layer {
             space,
             layer,
             cell_diameter,
-            cells,
+            hcells,
         }
     }
     //
-    fn insert(&self, cell: &Cell<'a, T>) {
+    fn insert(&self, cell: Cell<'a, T>) {
         if self.get_cell(&cell.index).is_some() {
             panic!("internal error");
         }
-        self.cells.insert(cell.index.clone(), cell.clone());
+        self.hcells.insert(cell.index.clone(), cell);
+    }
+
+    fn insert_cells(&mut self, cells: Vec<Cell<'a, T>>) {
+        //
+        cells
+            .into_iter()
+            .map(|cell| self.hcells.insert(cell.index.clone(), cell));
     }
 
     // returns a dashmap Ref to cell is it exist
     // used only to check coherence. Sub cells are created inside one thread.
     // TODO: do we need dashmap?
-    fn get_cell(&self, position: &[usize]) -> Option<one::Ref<Vec<usize>, Cell<'a, T>>> {
-        self.cells.get(position)
+    fn get_cell(&self, position: &[u32]) -> Option<one::Ref<Vec<u32>, Cell<'a, T>>> {
+        self.hcells.get(position)
     }
 } // end implementation Layer
 
@@ -236,7 +266,7 @@ pub struct SpaceMesh<'a, T: Float> {
     //
     mindist: f64,
     // leaves are at 0, root node will be at layer_max
-    layer_max: usize,
+    layer_max: u32,
     //
     layers: Vec<Layer<'a, T>>,
     //
@@ -251,19 +281,26 @@ where
     T: Float + Debug,
 {
     /// define Space.
-    /// -
+    /// - data points to cluster
+    /// - mindist to discriminate points. under this distance points will be associated
     ///
     pub fn new(space: Space, points: Vec<Point<T>>, mindist: f64) -> Self {
         assert!(
             mindist > 0.,
             "mindist cannot be 0, should related to width so that max layer is not too large"
         );
-        let layer_max: usize = (space.get_dim() as f64 * space.get_width().sqrt() / mindist)
+        let layer_max_u: usize = (space.get_dim() as f64 * space.get_width().sqrt() / mindist)
             .log2()
-            .ceil() as usize;
-        log::info!("nb layer max : {}", layer_max);
+            .ceil()
+            .trunc() as usize;
+        let nb_layer = layer_max_u + 1;
+        log::info!("nb layer : {}", nb_layer);
+        if (nb_layer >= 8) {
+            log::warn!("perhaps increase mindist to reduce nb_layer");
+        }
+        let layer_max: u32 = layer_max_u.try_into().unwrap();
         //
-        let mut layers: Vec<Layer<T>> = Vec::with_capacity(layer_max + 1);
+        let mut layers: Vec<Layer<T>> = Vec::with_capacity(layer_max as usize + 1);
         //
         SpaceMesh {
             space,
@@ -289,20 +326,20 @@ where
     }
 
     /// returns maximum layer , or layer of root node
-    pub fn get_root_layer(&self) -> usize {
+    pub fn get_root_layer(&self) -> u32 {
         self.layer_max
     }
 
-    pub fn get_layer_max(&self) -> usize {
+    pub fn get_layer_max(&self) -> u32 {
         self.layer_max
     }
-    ///
+    /// returns minimum distance detectable by mesh
     pub fn get_mindist(&self) -> f64 {
         self.mindist
     }
     /// return coordinate of a cell for a point at layer l layer 0 is at finer scale
     pub fn get_cell_center(&self, p: &[T], l: usize) -> Vec<usize> {
-        let exp: u32 = (self.layer_max - l).try_into().unwrap();
+        let exp: u32 = (self.layer_max as usize - l).try_into().unwrap();
         let cell_size = self.get_width() / 2usize.pow(exp) as f64;
         let mut coordinates = Vec::<usize>::with_capacity(self.get_dim());
         for d in 0..self.get_dim() {
@@ -319,21 +356,24 @@ where
         coordinates
     }
 
-    pub fn get_layer_cell_diameter(&self, layer: usize) -> f64 {
-        let cell_diameter: f64 = (self.space.get_width() * self.space.get_dim() as f64).sqrt()
-            / 2_u32.pow(self.layer_max as u32 - layer as u32) as f64;
+    /// for layer 0, the layer with the least number of cells,
+    /// the diameter of a cell is $$ width * \sqrt(d)/2^(nb_layer - layer_max)  $$
+    ///  - Delta max value of  extension by dimension
+    ///  - d : dimension of space
+    ///  - l : layer num in 0..nb_layer
+    pub fn get_layer_cell_diameter(&self, layer: u32) -> f64 {
+        assert!(layer <= self.layer_max);
+        //
+        let cell_diameter: f64 = (self.space.get_width() * (self.space.get_dim() as f64).sqrt())
+            / 2_u32.pow(self.layer_max + 1 - layer) as f64;
         cell_diameter
     }
 
     pub fn cluster(&mut self) {
         // propagate points through layers form to (layer lmax to bottom layer 0
         // initialize root cell
-        let mut upper_layer: Layer<T> = Layer::new(
-            self.space,
-            self.get_layer_max(),
-            self.get_layer_cell_diameter(self.get_layer_max()),
-        );
-        let center = vec![0usize; self.get_dim()]; // root cell
+
+        let center = vec![0u32; self.get_dim()]; // root cell
         let mut global_cell: Cell<T> = Cell::new(&self.space, self.get_layer_max(), center);
         //
         self.points
@@ -342,7 +382,15 @@ where
             .iter()
             .map(|p| global_cell.add_point(p));
         // now to first layer (one cell) others layers can be made //
-    }
+        let cells_first = global_cell.split().unwrap();
+        // initialize first layer (layer max)
+        let mut upper_layer: Layer<T> = Layer::new(
+            self.space,
+            self.get_layer_max(),
+            self.get_layer_cell_diameter(self.get_layer_max()),
+        );
+        upper_layer.insert_cells(cells_first);
+    } // end of cluster
 } // end of impl SpaceMesh
 
 //===========================
@@ -400,3 +448,37 @@ where
 
 
 */
+
+//========================================================
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    use rand::distributions::Uniform;
+    use rand::prelude::*;
+    use rand_xoshiro::Xoshiro256PlusPlus;
+
+    fn log_init_test() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
+    #[test]
+    fn test_uniform_random() {
+        log_init_test();
+        log::info!("in test_spectral_radius_full");
+        //
+        let nbvec = 2000usize;
+        let dim = 5;
+        let width: f64 = 1000.;
+        let mindist = 0.1;
+        let unif_01 = Uniform::<f64>::new(0., width);
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
+        let mut points: Vec<Point<f64>> = Vec::with_capacity(nbvec);
+        for i in 0..nbvec {
+            let p: Vec<f64> = (0..dim).map(|_| unif_01.sample(&mut rng)).collect();
+            points.push(Point::<f64>::new(i, p, (i % 5).try_into().unwrap()));
+        }
+    } //end of test_uniform_random
+} // end of mod test
