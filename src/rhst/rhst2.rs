@@ -234,7 +234,7 @@ where
         self.hcells.insert(cell.index.clone(), cell);
     }
 
-    fn insert_cells(&mut self, cells: Vec<Cell<'a, T>>) {
+    fn insert_cells(&self, cells: Vec<Cell<'a, T>>) {
         //
         cells
             .into_iter()
@@ -340,7 +340,7 @@ where
     /// return coordinate of a cell for a point at layer l layer 0 is at finer scale
     pub fn get_cell_center(&self, p: &[T], l: usize) -> Vec<usize> {
         let exp: u32 = (self.layer_max as usize - l).try_into().unwrap();
-        let cell_size = self.get_width() / 2usize.pow(exp) as f64;
+        let cell_size = self.get_width() / 2_usize.pow(exp) as f64;
         let mut coordinates = Vec::<usize>::with_capacity(self.get_dim());
         for d in 0..self.get_dim() {
             let idx_f: f64 = ((p[d].to_f64().unwrap() - self.space.get_xmin()) / cell_size).trunc();
@@ -354,7 +354,7 @@ where
             coordinates.push(idx_f as usize);
         }
         coordinates
-    }
+    } // end get_cell_center
 
     /// for layer 0, the layer with the least number of cells,
     /// the diameter of a cell is $$ width * \sqrt(d)/2^(nb_layer - layer_max)  $$
@@ -369,7 +369,8 @@ where
         cell_diameter
     }
 
-    pub fn cluster(&mut self) {
+    /// this function embeds data in a 2-rhst
+    pub fn embed(&mut self) {
         // propagate points through layers form to (layer lmax to bottom layer 0
         // initialize root cell
 
@@ -390,10 +391,43 @@ where
             self.get_layer_cell_diameter(self.get_layer_max()),
         );
         upper_layer.insert_cells(cells_first);
+        // now we can propagate layer downward, cells can be treated //
+        //
+        panic!("not yet impelmented");
     } // end of cluster
 } // end of impl SpaceMesh
 
 //===========================
+
+// TODO: should add shift margin
+// space must enclose points
+fn check_space<T: Float + Debug>(space: &Space, points: &[Point<T>]) {
+    assert!(points.len() > 0);
+    //
+    let mut max_xi = T::min_value();
+    let mut min_xi: T = T::max_value();
+    for (ipt, pt) in points.iter().enumerate() {
+        for (i, xi) in pt.get_position().iter().enumerate() {
+            if (space.get_xmin() >= <f64 as num_traits::NumCast>::from(*xi).unwrap()) {
+                log::error!(
+                    "space.get_xmin() too high,  point of rank {} has xi = {:?} ",
+                    ipt,
+                    xi
+                );
+                panic!();
+            }
+            max_xi = max_xi.max(*xi);
+            min_xi = min_xi.min(*xi);
+        }
+    }
+    let delta = max_xi - min_xi;
+    //
+    log::error!(
+        "minimum space, xmin : {:.3e}, width : {:.3e}",
+        <f64 as num_traits::NumCast>::from(min_xi).unwrap(),
+        <f64 as num_traits::NumCast>::from(delta).unwrap()
+    );
+} // end of check_space
 
 //=======
 
