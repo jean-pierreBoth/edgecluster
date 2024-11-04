@@ -67,18 +67,36 @@ pub struct Space {
     width: f64,
     // smallest coordinate
     xmin: f64,
+    // minimum distance we want to discriminate
+    mindist: f64,
+    //
+    nb_layer: usize,
 }
 
 impl Space {
     /// define Space.
     /// -
     ///
-    pub fn new(dim: usize, xmin: f64, xmax: f64) -> Self {
+    pub fn new(dim: usize, xmin: f64, xmax: f64, mindist: f64) -> Self {
         let width = xmax - xmin;
+        assert!(
+            mindist > 0.,
+            "mindist cannot be 0, should related to width so that max layer is not too large"
+        );
+        let layer_max_u: usize =
+            (dim as f64 * width.sqrt() / mindist).log2().ceil().trunc() as usize;
+        let nb_layer = layer_max_u + 1;
+        log::info!("nb layer : {}", nb_layer);
+        if (nb_layer >= 8) {
+            log::warn!("perhaps increase mindist to reduce nb_layer");
+        }
+        let layer_max: u32 = layer_max_u.try_into().unwrap();
         Space {
             dim,
-            xmin,
             width: xmax - xmin,
+            xmin,
+            mindist,
+            nb_layer,
         }
     }
 
@@ -94,10 +112,6 @@ impl Space {
     /// fn get_xmin
     pub fn get_xmin(&self) -> f64 {
         self.xmin
-    }
-
-    pub fn get_cell_center(&self, layer: u32, index: &[u32]) -> Vec<f64> {
-        panic!("not yet implemented");
     }
 }
 
@@ -130,7 +144,7 @@ where
         }
     }
 
-    ///
+    //
     pub fn get_layer(&self) -> usize {
         self.layer as usize
     }
@@ -165,6 +179,20 @@ where
         self.points_in = Some(<Vec<&'a Point<T>>>::from(points));
     }
 
+    // given layer and index in mesh, returns cooridnates of center of mesh in space
+    // at upper layer cell width is space width divided by 2 and so on
+    fn get_cell_center(&self) -> Vec<f64> {
+        let exponent: i32 = (self.space.nb_layer - self.layer as usize)
+            .try_into()
+            .unwrap();
+        let cell_width = self.space.width / 2.0_f64.powi(exponent);
+        let position: Vec<f64> = (0..self.space.dim)
+            .map(|i| 0.5 * cell_width + self.index[i] as f64 * self.space.width)
+            .collect();
+        //
+        position
+    } // end of get_cell_center
+
     // This function parse points and allocate a subcell when a point requires it.
     fn split(&self) -> Option<Vec<Cell<'a, T>>> {
         //
@@ -173,13 +201,12 @@ where
             self.points_in.as_ref()?; /* return in case of None */
         }
         //
-        let mut new_cells: Vec<Cell<T>> = Vec::new();
         let mut hashed_cells: HashMap<Vec<u32>, Cell<T>> = HashMap::new();
         //
         for point in self.points_in.as_ref().unwrap() {
             let xyz = point.get_position();
             let mut split_index = Vec::<u32>::with_capacity(self.space.get_dim());
-            let cell_center = self.space.get_cell_center(self.layer, &self.index);
+            let cell_center = self.get_cell_center();
             for i in 0..xyz.len() {
                 if xyz[i].to_f64().unwrap() > cell_center[i] {
                     // point is in upper part
@@ -197,11 +224,17 @@ where
                 hashed_cells.insert(split_index.clone(), new_cell);
             }
         }
+        // do not forget to fill new_cells !!
+        let mut new_cells: Vec<Cell<T>> = Vec::new();
+        for (k, v) in hashed_cells.drain() {
+            new_cells.push(v);
+        }
         //
         log::debug!(
-            "cell with nb points {:?} splitted in {:?} new cells",
+            "layer : {}, cell with nb points {:?} splitted in {:?} new cells",
+            self.layer,
             self.points_in.as_ref().unwrap().len(),
-            hashed_cells.len()
+            new_cells.len()
         );
         //
         Some(new_cells)
@@ -245,9 +278,11 @@ where
 
     fn insert_cells(&self, cells: Vec<Cell<'a, T>>) {
         //
-        cells
-            .into_iter()
-            .map(|cell| self.hcells.insert(cell.index.clone(), cell));
+        assert!(!cells.is_empty());
+        for cell in cells {
+            self.hcells.insert(cell.index.clone(), cell);
+        }
+        assert!(!self.hcells.is_empty());
     }
 
     // returns a dashmap Ref to cell is it exist
@@ -290,8 +325,6 @@ where
 /// Cells are nodes in a tree, each cell , if some data is present, will have children in lower cells.
 pub struct SpaceMesh<'a, T: Float> {
     space: &'a Space,
-    //
-    mindist: f64,
     // leaves are at 0, root node will be at layer_max
     layer_max: u32,
     //
@@ -313,12 +346,12 @@ where
     /// - data points to cluster
     /// - mindist to discriminate points. under this distance points will be associated
     ///
-    pub fn new(space: &'a Space, points: Vec<&'a Point<T>>, mindist: f64) -> Self {
+    pub fn new(space: &'a Space, points: Vec<&'a Point<T>>) -> Self {
         assert!(
-            mindist > 0.,
+            space.mindist > 0.,
             "mindist cannot be 0, should related to width so that max layer is not too large"
         );
-        let layer_max_u: usize = (space.get_dim() as f64 * space.get_width().sqrt() / mindist)
+        let layer_max_u: usize = (space.get_dim() as f64 * space.get_width().sqrt() / space.mindist)
             .log2()
             .ceil()
             .trunc() as usize;
@@ -333,7 +366,6 @@ where
         //
         SpaceMesh {
             space,
-            mindist,
             layer_max,
             global_cell: None,
             layers,
@@ -341,6 +373,7 @@ where
             benefits: None,
         }
     }
+
     /// returns cell diameter at layer l
     pub fn get_cell_diam(&self, l: usize) -> f64 {
         panic!("not yet implemented");
@@ -369,13 +402,14 @@ where
 
     /// returns minimum distance detectable by mesh
     pub fn get_mindist(&self) -> f64 {
-        self.mindist
+        self.space.mindist
     }
-    /// return coordinate of a cell for a point at layer l layer 0 is at finer scale
-    pub fn get_cell_center(&self, p: &[T], l: usize) -> Vec<usize> {
+
+    /// return index in mesh of a cell for a point at layer l layer 0 is at finer scale
+    pub fn get_cell_index(&self, p: &[T], l: usize) -> Vec<usize> {
         let exp: u32 = (self.layer_max as usize - l).try_into().unwrap();
         let cell_size = self.get_width() / 2_usize.pow(exp) as f64;
-        let mut coordinates = Vec::<usize>::with_capacity(self.get_dim());
+        let mut index = Vec::<usize>::with_capacity(self.get_dim());
         for d in 0..self.get_dim() {
             let idx_f: f64 = ((p[d].to_f64().unwrap() - self.space.get_xmin()) / cell_size).trunc();
             if idx_f < 0. {
@@ -385,10 +419,10 @@ where
                 );
                 panic!("negative coordinate for cell");
             }
-            coordinates.push(idx_f as usize);
+            index.push(idx_f as usize);
         }
-        coordinates
-    } // end get_cell_center
+        index
+    } // end get_cell_index
 
     /// for layer 0, the layer with the least number of cells,
     /// the diameter of a cell is $$ width * \sqrt(d)/2^(nb_layer - layer_max)  $$
@@ -422,13 +456,11 @@ where
         log::info!("SpaceMesh::embed allocated nb layers {}", self.layers.len());
         // initialize root cell
         let center = vec![0u32; self.get_dim()];
-        // root cell
-        let mut global_cell = Cell::<T>::new(&self.space, self.get_layer_max(), center);
+        // root cell, it is declared above maximum layer as it is isolated...
+        let mut global_cell = Cell::<T>::new(self.space, self.get_layer_max() + 1, center);
         global_cell.init_points(&self.points.as_ref().unwrap().clone());
         self.global_cell = Some(global_cell);
-
         //
-        let mut upper_layer = &self.layers[self.get_layer_max() as usize];
         //
         self.points
             .as_ref()
@@ -442,22 +474,22 @@ where
             panic!();
         }
         let cells_first = cells_first_res.unwrap();
+        log::info!("global cell split in nb cells {}", cells_first.len());
         // initialize first layer (layer max)
-        let mut upper_layer: Layer<T> = Layer::new(
-            self.space,
-            self.get_layer_max(),
-            self.get_layer_cell_diameter(self.get_layer_max()),
-        );
+        let mut upper_layer = &self.layers[self.get_layer_max() as usize];
         upper_layer.insert_cells(cells_first);
+        assert!(upper_layer.get_nb_cells() > 0);
         // now we can propagate layer downward, cells can be treated // using par_iter_mut
-        for l in (1..self.get_layer_max() as usize).rev() {
+        for l in (1..self.get_nb_layers()).rev() {
             log::info!("splitting layer : l : {}", l);
             let cell_iter = self.layers[l].get_iter_mut();
             let lower_layer = &self.layers[l - 1];
             for cell in cell_iter {
                 assert_eq!(l, cell.get_layer());
                 let new_cells = cell.split();
-                lower_layer.insert_cells(new_cells.unwrap());
+                if new_cells.is_some() {
+                    lower_layer.insert_cells(new_cells.unwrap());
+                }
             }
         }
         //
@@ -489,7 +521,7 @@ where
 // TODO: should add shift margin
 // space must enclose points
 fn check_space<T: Float + Debug>(space: &Space, points: &[Point<T>]) {
-    assert!(points.len() > 0);
+    assert!(!points.is_empty());
     //
     let mut max_xi = T::min_value();
     let mut min_xi: T = T::max_value();
@@ -588,7 +620,7 @@ mod tests {
     #[test]
     fn test_uniform_random() {
         log_init_test();
-        log::info!("in test_spectral_radius_full");
+        log::info!("in test_uniform_random");
         //
         let nbvec = 2000usize;
         let dim = 5;
@@ -601,12 +633,11 @@ mod tests {
             let p: Vec<f64> = (0..dim).map(|_| unif_01.sample(&mut rng)).collect();
             points.push(Point::<f64>::new(i, p, (i % 5).try_into().unwrap()));
         }
-
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         // Space definition
-        let space = Space::new(dim, 0., width);
+        let space = Space::new(dim, 0., width, 0.1);
 
-        let mut mesh = SpaceMesh::new(&space, refpoints, 0.1);
+        let mut mesh = SpaceMesh::new(&space, refpoints);
         mesh.embed();
         mesh.summary();
 
