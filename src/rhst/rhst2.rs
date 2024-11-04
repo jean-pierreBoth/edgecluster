@@ -1,14 +1,14 @@
-//! This is a small rhst implementation as described in cohen-addad paper
-//! It requires data to have small/moderated dimension. This can be achieved using a first step of dimension reduction
-//! via random projections or an embedding via the crate [annembed](https://crates.io/crates/annembed)
-//!
 #![allow(clippy::needless_range_loop)]
 
+/// This is a small rhst implementation as described in Cohen-Addad paper  
+/// It requires data to have small/moderated dimension. This can be achieved using a first step of dimension reduction
+/// via random projections or an embedding via the crate [annembed](https://crates.io/crates/annembed)
+///
+///
 // We prefer rhst over cover trees as described in
 //  TerraPattern: A Nearest Neighbor Search Service (2019)
 //  Zaheer, Guruganesh, Levin Smola
 //  as we can group points very close (under lower distance threshold) in one cell
-
 use num_traits::cast::*;
 use num_traits::float::Float;
 
@@ -167,8 +167,11 @@ where
 
     // This function parse points and allocate a subcell when a point requires it.
     fn split(&self) -> Option<Vec<Cell<'a, T>>> {
-        assert!(self.layer > 0);
-        self.points_in.as_ref()?; /* return in case of None */
+        //
+        if self.points_in.is_none() {
+            log::debug!("no points in cell");
+            self.points_in.as_ref()?; /* return in case of None */
+        }
         //
         let mut new_cells: Vec<Cell<T>> = Vec::new();
         let mut hashed_cells: HashMap<Vec<u32>, Cell<T>> = HashMap::new();
@@ -209,7 +212,7 @@ where
 
 /// a layer gathers nodes if a given layer.
 struct Layer<'a, T> {
-    space: Space,
+    space: &'a Space,
     // my layer
     layer: u32,
     //
@@ -223,7 +226,7 @@ where
     T: Float + Debug + Sync,
 {
     //
-    fn new(space: Space, layer: u32, cell_diameter: f64) -> Self {
+    fn new(space: &'a Space, layer: u32, cell_diameter: f64) -> Self {
         let hcells: DashMap<Vec<u32>, Cell<T>> = DashMap::new();
         Layer {
             space,
@@ -263,6 +266,14 @@ where
     fn get_par_iter_mut(&self) -> rayon::map::IterMut<Vec<u32>, Cell<'a, T>> {
         self.hcells.par_iter_mut()
     }
+
+    fn get_nb_cells(&self) -> usize {
+        self.hcells.len()
+    }
+
+    fn get_diameter(&self) -> f64 {
+        self.cell_diameter
+    }
 } // end implementation Layer
 
 //============================
@@ -278,7 +289,7 @@ where
 /// The algo will slice space in different layers with cells side decreasing by a factor 2 at each layer
 /// Cells are nodes in a tree, each cell , if some data is present, will have children in lower cells.
 pub struct SpaceMesh<'a, T: Float> {
-    space: Space,
+    space: &'a Space,
     //
     mindist: f64,
     // leaves are at 0, root node will be at layer_max
@@ -288,7 +299,7 @@ pub struct SpaceMesh<'a, T: Float> {
     // layers are stroed in vector according to their layer num
     layers: Vec<Layer<'a, T>>,
     //
-    points: Option<Vec<Point<T>>>,
+    points: Option<Vec<&'a Point<T>>>,
     // benefit of each couple (point rank, layer)
     // benefits[r][l] gives  gives benefit of point of rank r in points at layer l
     benefits: Option<Vec<Vec<f32>>>,
@@ -302,7 +313,7 @@ where
     /// - data points to cluster
     /// - mindist to discriminate points. under this distance points will be associated
     ///
-    pub fn new(space: Space, points: Vec<Point<T>>, mindist: f64) -> Self {
+    pub fn new(space: &'a Space, points: Vec<&'a Point<T>>, mindist: f64) -> Self {
         assert!(
             mindist > 0.,
             "mindist cannot be 0, should related to width so that max layer is not too large"
@@ -399,7 +410,7 @@ where
 
     /// this function embeds data in a 2-rhst
     /// It propagate cells partitioning space from coarser to finer mesh
-    pub fn embed(&'a mut self) {
+    pub fn embed(&mut self) {
         // initialize layers (layer lmax to bottom layer 0
         self.layers = Vec::with_capacity(self.get_nb_layers());
         for l in 0..self.get_nb_layers() {
@@ -408,9 +419,14 @@ where
 
             self.layers.push(layer);
         }
+        log::info!("SpaceMesh::embed allocated nb layers {}", self.layers.len());
         // initialize root cell
-        let center = vec![0u32; self.get_dim()]; // root cell
-        self.global_cell = Some(Cell::new(&self.space, self.get_layer_max(), center));
+        let center = vec![0u32; self.get_dim()];
+        // root cell
+        let mut global_cell = Cell::<T>::new(&self.space, self.get_layer_max(), center);
+        global_cell.init_points(&self.points.as_ref().unwrap().clone());
+        self.global_cell = Some(global_cell);
+
         //
         let mut upper_layer = &self.layers[self.get_layer_max() as usize];
         //
@@ -419,8 +435,13 @@ where
             .unwrap()
             .iter()
             .map(|p| self.global_cell.as_mut().unwrap().add_point(p));
-        // now to first layer (one cell) others layers can be made //
-        let cells_first = self.global_cell.as_ref().unwrap().split().unwrap();
+        // now to first layer (one cell) others layers can be made
+        let cells_first_res = self.global_cell.as_ref().unwrap().split();
+        if cells_first_res.is_none() {
+            log::error!("splitting of  global cell failed");
+            panic!();
+        }
+        let cells_first = cells_first_res.unwrap();
         // initialize first layer (layer max)
         let mut upper_layer: Layer<T> = Layer::new(
             self.space,
@@ -429,7 +450,8 @@ where
         );
         upper_layer.insert_cells(cells_first);
         // now we can propagate layer downward, cells can be treated // using par_iter_mut
-        for l in (self.get_layer_max() as usize - 1)..1 {
+        for l in (1..self.get_layer_max() as usize).rev() {
+            log::info!("splitting layer : l : {}", l);
             let cell_iter = self.layers[l].get_iter_mut();
             let lower_layer = &self.layers[l - 1];
             for cell in cell_iter {
@@ -441,8 +463,25 @@ where
         //
         log::info!("end of downward cell propagation");
         //
-        panic!("not yet impelmented");
-    } // end of cluster
+    } // end of embed
+
+    /// gives a summary: number of cells by layer etc
+    pub fn summary(&mut self) {
+        //
+        if self.layers.is_empty() {
+            println!("layers not allocated");
+            std::process::exit(1);
+        }
+        println!(" number of layers : {}", self.get_nb_layers());
+        for l in (0..self.get_nb_layers()).rev() {
+            println!(
+                "layer : {}, nb cells : {}, cell diameter : {:.3e}",
+                l,
+                self.layers[l].get_nb_cells(),
+                self.layers[l].get_diameter()
+            );
+        }
+    }
 } // end of impl SpaceMesh
 
 //===========================
@@ -562,8 +601,15 @@ mod tests {
             let p: Vec<f64> = (0..dim).map(|_| unif_01.sample(&mut rng)).collect();
             points.push(Point::<f64>::new(i, p, (i % 5).try_into().unwrap()));
         }
+
+        let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         // Space definition
         let space = Space::new(dim, 0., width);
-        let mesh = SpaceMesh::new(space, points, 0.1);
+
+        let mut mesh = SpaceMesh::new(&space, refpoints, 0.1);
+        mesh.embed();
+        mesh.summary();
+
+        //
     } //end of test_uniform_random
 } // end of mod test
