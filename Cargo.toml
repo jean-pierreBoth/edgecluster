@@ -10,7 +10,8 @@ edition = "2021"
 
 [dependencies]
 
-dashmap = { version = "6.1" }
+ego-tree = { version = "0.9" }
+dashmap = { version = "6.1", features = ["rayon"] }
 
 # for //
 parking_lot = { version = "0.12" }

@@ -14,7 +14,8 @@ use num_traits::float::Float;
 
 use std::fmt::Debug;
 
-use dashmap::{mapref::one, DashMap};
+use dashmap::{iter, mapref::one, rayon, DashMap};
+
 use ego_tree::{tree, NodeMut, Tree};
 use std::collections::HashMap;
 
@@ -129,6 +130,11 @@ where
         }
     }
 
+    ///
+    pub fn get_layer(&self) -> usize {
+        self.layer as usize
+    }
+
     /// Return cel weight. This is also the cardinal of the subtree corresponding to a point in cell
     pub fn get_cell_weight(&self) -> f32 {
         if let Some(points) = self.points_in.as_ref() {
@@ -160,7 +166,7 @@ where
     }
 
     // This function parse points and allocate a subcell when a point requires it.
-    fn split(&self) -> Option<Vec<Cell<T>>> {
+    fn split(&self) -> Option<Vec<Cell<'a, T>>> {
         assert!(self.layer > 0);
         self.points_in.as_ref()?; /* return in case of None */
         //
@@ -214,7 +220,7 @@ struct Layer<'a, T> {
 
 impl<'a, T> Layer<'a, T>
 where
-    T: Float + Debug,
+    T: Float + Debug + Sync,
 {
     //
     fn new(space: Space, layer: u32, cell_diameter: f64) -> Self {
@@ -247,6 +253,16 @@ where
     fn get_cell(&self, position: &[u32]) -> Option<one::Ref<Vec<u32>, Cell<'a, T>>> {
         self.hcells.get(position)
     }
+
+    // get an iterator over cells
+    fn get_iter_mut(&self) -> iter::IterMut<Vec<u32>, Cell<'a, T>> {
+        self.hcells.iter_mut()
+    }
+
+    // get an iterator over cells
+    fn get_par_iter_mut(&self) -> rayon::map::IterMut<Vec<u32>, Cell<'a, T>> {
+        self.hcells.par_iter_mut()
+    }
 } // end implementation Layer
 
 //============================
@@ -268,6 +284,8 @@ pub struct SpaceMesh<'a, T: Float> {
     // leaves are at 0, root node will be at layer_max
     layer_max: u32,
     //
+    global_cell: Option<Cell<'a, T>>,
+    // layers are stroed in vector according to their layer num
     layers: Vec<Layer<'a, T>>,
     //
     points: Option<Vec<Point<T>>>,
@@ -278,7 +296,7 @@ pub struct SpaceMesh<'a, T: Float> {
 
 impl<'a, T> SpaceMesh<'a, T>
 where
-    T: Float + Debug,
+    T: Float + Debug + Sync,
 {
     /// define Space.
     /// - data points to cluster
@@ -306,6 +324,7 @@ where
             space,
             mindist,
             layer_max,
+            global_cell: None,
             layers,
             points: Some(points),
             benefits: None,
@@ -333,6 +352,10 @@ where
     pub fn get_layer_max(&self) -> u32 {
         self.layer_max
     }
+    pub fn get_nb_layers(&self) -> usize {
+        self.layer_max as usize + 1
+    }
+
     /// returns minimum distance detectable by mesh
     pub fn get_mindist(&self) -> f64 {
         self.mindist
@@ -369,21 +392,35 @@ where
         cell_diameter
     }
 
-    /// this function embeds data in a 2-rhst
-    pub fn embed(&mut self) {
-        // propagate points through layers form to (layer lmax to bottom layer 0
-        // initialize root cell
+    // we propagate cell of  upper layer (index 0 in vec) to lower (smaller cells) layers
+    fn upper_layer_downward(&'a self, cell: &Cell<T>) {
+        let upper_layer = self.layers.last().unwrap();
+    }
 
+    /// this function embeds data in a 2-rhst
+    /// It propagate cells partitioning space from coarser to finer mesh
+    pub fn embed(&'a mut self) {
+        // initialize layers (layer lmax to bottom layer 0
+        self.layers = Vec::with_capacity(self.get_nb_layers());
+        for l in 0..self.get_nb_layers() {
+            let layer =
+                Layer::<T>::new(self.space, l as u32, self.get_layer_cell_diameter(l as u32));
+
+            self.layers.push(layer);
+        }
+        // initialize root cell
         let center = vec![0u32; self.get_dim()]; // root cell
-        let mut global_cell: Cell<T> = Cell::new(&self.space, self.get_layer_max(), center);
+        self.global_cell = Some(Cell::new(&self.space, self.get_layer_max(), center));
+        //
+        let mut upper_layer = &self.layers[self.get_layer_max() as usize];
         //
         self.points
             .as_ref()
             .unwrap()
             .iter()
-            .map(|p| global_cell.add_point(p));
+            .map(|p| self.global_cell.as_mut().unwrap().add_point(p));
         // now to first layer (one cell) others layers can be made //
-        let cells_first = global_cell.split().unwrap();
+        let cells_first = self.global_cell.as_ref().unwrap().split().unwrap();
         // initialize first layer (layer max)
         let mut upper_layer: Layer<T> = Layer::new(
             self.space,
@@ -391,7 +428,18 @@ where
             self.get_layer_cell_diameter(self.get_layer_max()),
         );
         upper_layer.insert_cells(cells_first);
-        // now we can propagate layer downward, cells can be treated //
+        // now we can propagate layer downward, cells can be treated // using par_iter_mut
+        for l in (self.get_layer_max() as usize - 1)..1 {
+            let cell_iter = self.layers[l].get_iter_mut();
+            let lower_layer = &self.layers[l - 1];
+            for cell in cell_iter {
+                assert_eq!(l, cell.get_layer());
+                let new_cells = cell.split();
+                lower_layer.insert_cells(new_cells.unwrap());
+            }
+        }
+        //
+        log::info!("end of downward cell propagation");
         //
         panic!("not yet impelmented");
     } // end of cluster
@@ -514,5 +562,8 @@ mod tests {
             let p: Vec<f64> = (0..dim).map(|_| unif_01.sample(&mut rng)).collect();
             points.push(Point::<f64>::new(i, p, (i % 5).try_into().unwrap()));
         }
+        // Space definition
+        let space = Space::new(dim, 0., width);
+        let mesh = SpaceMesh::new(space, points, 0.1);
     } //end of test_uniform_random
 } // end of mod test
