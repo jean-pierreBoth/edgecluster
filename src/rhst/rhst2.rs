@@ -14,9 +14,9 @@ use num_traits::float::Float;
 
 use std::fmt::Debug;
 
-use dashmap::{iter, mapref::one, rayon, DashMap};
-
+use dashmap::{iter, mapref::one, rayon::*, DashMap};
 use ego_tree::{tree, NodeMut, Tree};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::collections::HashMap;
 
 type NodeId = usize;
@@ -310,7 +310,7 @@ where
     }
 
     // get an iterator over cells
-    fn get_par_iter_mut(&self) -> rayon::map::IterMut<Vec<u32>, Cell<'a, T>> {
+    fn get_par_iter_mut(&self) -> map::IterMut<Vec<u32>, Cell<'a, T>> {
         self.hcells.par_iter_mut()
     }
 
@@ -322,6 +322,9 @@ where
         self.cell_diameter
     }
 
+    fn get_hcells(&self) -> &DashMap<Vec<u32>, Cell<'a, T>> {
+        &self.hcells
+    }
     // count points in layer
     fn count_points(&self) -> usize {
         let nbpoints: usize = self
@@ -503,15 +506,17 @@ where
         // now we can propagate layer downward, cells can be treated // using par_iter_mut
         for l in (1..self.get_nb_layers()).rev() {
             log::info!("splitting layer : l : {}", l);
-            let cell_iter = self.layers[l].get_iter_mut();
             let lower_layer = &self.layers[l - 1];
-            for cell in cell_iter {
-                assert_eq!(l, cell.get_layer());
-                let new_cells = cell.split();
-                if new_cells.is_some() {
-                    lower_layer.insert_cells(new_cells.unwrap());
-                }
-            }
+            // changing into_iter to into_par_iter is sufficient to get //. (*5 in cargo test)
+            self.layers[l]
+                .get_hcells()
+                .into_par_iter()
+                .for_each(|cell| {
+                    assert_eq!(l, cell.get_layer());
+                    if let Some(new_cells) = cell.split() {
+                        lower_layer.insert_cells(new_cells);
+                    }
+                });
         }
         //
         log::info!("end of downward cell propagation");
@@ -644,8 +649,8 @@ mod tests {
         log_init_test();
         log::info!("in test_uniform_random");
         //
-        let nbvec = 2000usize;
-        let dim = 5;
+        let nbvec = 10000usize;
+        let dim = 10;
         let width: f64 = 1000.;
         let mindist = 0.1;
         let unif_01 = Uniform::<f64>::new(0., width);
