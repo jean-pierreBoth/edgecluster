@@ -150,6 +150,7 @@ where
     }
 
     /// Return cel weight. This is also the cardinal of the subtree corresponding to a point in cell
+    /// as long as points have no weights
     pub fn get_cell_weight(&self) -> f32 {
         if let Some(points) = self.points_in.as_ref() {
             points.len() as f32
@@ -157,6 +158,15 @@ where
             0.
         }
     } // end of get_cell_weight
+
+    /// Return number of points.
+    pub fn get_nb_points(&self) -> usize {
+        if let Some(points) = self.points_in.as_ref() {
+            points.len()
+        } else {
+            0
+        }
+    } // end of get_nb_point
 
     fn get_cell_index(&self) -> &[u32] {
         &self.index
@@ -220,7 +230,9 @@ where
             if let Some(cell) = hashed_cells.get_mut(&split_index) {
                 cell.add_point(point);
             } else {
-                let new_cell: Cell<T> = Cell::new(self.space, self.layer - 1, split_index.clone());
+                let mut new_cell: Cell<T> =
+                    Cell::new(self.space, self.layer - 1, split_index.clone());
+                new_cell.add_point(point);
                 hashed_cells.insert(split_index.clone(), new_cell);
             }
         }
@@ -308,6 +320,15 @@ where
 
     fn get_diameter(&self) -> f64 {
         self.cell_diameter
+    }
+
+    // count points in layer
+    fn count_points(&self) -> usize {
+        let nbpoints: usize = self
+            .hcells
+            .iter()
+            .fold(0, |acc, entryref| acc + entryref.value().get_nb_points());
+        nbpoints
     }
 } // end implementation Layer
 
@@ -507,10 +528,11 @@ where
         println!(" number of layers : {}", self.get_nb_layers());
         for l in (0..self.get_nb_layers()).rev() {
             println!(
-                "layer : {}, nb cells : {}, cell diameter : {:.3e}",
+                "layer : {}, nb cells : {}, cell diameter : {:.3e}, nbpoints : {}",
                 l,
                 self.layers[l].get_nb_cells(),
-                self.layers[l].get_diameter()
+                self.layers[l].get_diameter(),
+                self.layers[l].count_points()
             );
         }
     }
