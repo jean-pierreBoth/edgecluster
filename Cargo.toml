@@ -45,3 +45,7 @@ katexit = { version = "0.1" }
 #log = { version = "0.4", features = ["max_level_debug", "release_max_level_info"] }
 log = { version = "0.4" }
 env_logger = { version = "0.11" }
+
+[dev-dependencies]
+
+rand_distr = { version = "0.4" }

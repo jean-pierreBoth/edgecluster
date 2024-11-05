@@ -1,10 +1,15 @@
 #![allow(clippy::needless_range_loop)]
 
-/// This is a small rhst implementation as described in Cohen-Addad paper  
-/// It requires data to have small/moderated dimension. This can be achieved using a first step of dimension reduction
+/// This is a small rhst implementation as described in Cohen-Addad paper
+/// The algorithm spilt the data space in square cells. At each layer the edge cells are divided by 2, so the number of cells
+/// increase  with the data dimension. The increase is not exponential as we keep only cells with data points in it.  
+/// The numbers of cells is bounded by the number of points in the data set.
+/// Another characteristic is that the volume of a cell decrease by a factor 2^d at each layer, so 2^(d*nblayer) should be related to
+/// the number of points.
+///
+/// Nevertheless it requires data to have small/moderated dimension. This can be achieved using a first step of dimension reduction
 /// via random projections or an embedding via the crate [annembed](https://crates.io/crates/annembed)
-///
-///
+//
 // We prefer rhst over cover trees as described in
 //  TerraPattern: A Nearest Neighbor Search Service (2019)
 //  Zaheer, Guruganesh, Levin Smola
@@ -349,7 +354,7 @@ where
 /// Cells are nodes in a tree, each cell , if some data is present, will have children in lower cells.
 pub struct SpaceMesh<'a, T: Float> {
     space: &'a Space,
-    // leaves are at 0, root node will be at layer_max
+    // leaves are at 0, root node will be above layer_max (at fictitious level nb_layers)
     layer_max: u32,
     //
     global_cell: Option<Cell<'a, T>>,
@@ -430,10 +435,10 @@ where
     }
 
     /// return index in mesh of a cell for a point at layer l layer 0 is at finer scale
-    pub fn get_cell_index(&self, p: &[T], l: usize) -> Vec<usize> {
+    pub fn get_cell_index(&self, p: &[T], l: usize) -> Vec<u32> {
         let exp: u32 = (self.layer_max as usize - l).try_into().unwrap();
         let cell_size = self.get_width() / 2_usize.pow(exp) as f64;
-        let mut index = Vec::<usize>::with_capacity(self.get_dim());
+        let mut index = Vec::<u32>::with_capacity(self.get_dim());
         for d in 0..self.get_dim() {
             let idx_f: f64 = ((p[d].to_f64().unwrap() - self.space.get_xmin()) / cell_size).trunc();
             if idx_f < 0. {
@@ -443,12 +448,18 @@ where
                 );
                 panic!("negative coordinate for cell");
             }
-            index.push(idx_f as usize);
+            index.push(idx_f as u32);
         }
         index
     } // end get_cell_index
 
-    /// for layer 0, the layer with the least number of cells,
+    // return reference to dashmap entry
+    fn get_cell(&self, p: &[T], l: usize) -> Option<one::Ref<Vec<u32>, Cell<'a, T>>> {
+        let idx = self.get_cell_index(p, l);
+        self.layers[l].get_cell(&idx)
+    }
+
+    /// for layer 0, the layer with the maximum number of cells,
     /// the diameter of a cell is $$ width * \sqrt(d)/2^(nb_layer - layer_max)  $$
     ///  - Delta max value of  extension by dimension
     ///  - d : dimension of space
@@ -640,6 +651,8 @@ mod tests {
     use rand::prelude::*;
     use rand_xoshiro::Xoshiro256PlusPlus;
 
+    use rand_distr::{Distribution, Exp};
+
     fn log_init_test() {
         let _ = env_logger::builder().is_test(true).try_init();
     }
@@ -670,4 +683,47 @@ mod tests {
 
         //
     } //end of test_uniform_random
+
+    #[test]
+    fn test_exp_random() {
+        log_init_test();
+        log::info!("in test_exp_random");
+        //
+        let nbvec = 10_000_000_usize;
+        let dim = 5;
+        let width: f64 = 1000.;
+        let mindist = 5.;
+        // sample with coordinates following exponential law
+        let law = Exp::<f64>::new(10. / width).unwrap();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
+        let mut points: Vec<Point<f64>> = Vec::with_capacity(nbvec);
+        for i in 0..nbvec {
+            let p: Vec<f64> = (0..dim).map(|_| law.sample(&mut rng).min(width)).collect();
+            points.push(Point::<f64>::new(i, p, (i % 5).try_into().unwrap()));
+        }
+        let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
+        // Space definition
+        let space = Space::new(dim, 0., width, mindist);
+
+        let mut mesh = SpaceMesh::new(&space, refpoints);
+        mesh.embed();
+        mesh.summary();
+        // check number of points for cell at origin
+        let p = vec![0.001; dim];
+        for l in (0..mesh.get_layer_max() as usize).rev() {
+            let refcell = mesh.get_cell(&p, l);
+            if let Some(cell) = mesh.get_cell(&p, l) {
+                let nbpoints_in = refcell.unwrap().value().get_nb_points();
+                log::info!(
+                    "nb point in cell corresponding to point {:?} at layer {} : {}",
+                    p,
+                    l,
+                    nbpoints_in
+                );
+            } else {
+                log::info!(" no data points in cell corresponding p at layer {}", l);
+            }
+        }
+        //
+    } //end of test_exp_random
 } // end of mod test
