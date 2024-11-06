@@ -436,7 +436,7 @@ where
 
     /// return index in mesh of a cell for a point at layer l layer 0 is at finer scale
     pub fn get_cell_index(&self, p: &[T], l: usize) -> Vec<u32> {
-        let exp: u32 = (self.layer_max as usize - l).try_into().unwrap();
+        let exp: u32 = (self.get_nb_layers() - l).try_into().unwrap();
         let cell_size = self.get_width() / 2_usize.pow(exp) as f64;
         let mut index = Vec::<u32>::with_capacity(self.get_dim());
         for d in 0..self.get_dim() {
