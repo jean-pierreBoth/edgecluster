@@ -15,16 +15,20 @@ struct CostBenefit<'a, T: Float> {
 
 impl<'a, T> CostBenefit<'a, T>
 where
-    T: Float,
+    T: Float + Sync + std::fmt::Debug,
 {
-    // compute benefits by points (in fact cells) and layer (See algo 2 of paper and lemma 3.4)
-    fn compute_benefits(&self) {}
+    // compute benefits by points (in fact cells at layer 0) and layer (See algo 2 of paper and lemma 3.4)
+    fn compute_benefits(&self) {
+        let nb_layers = self.spacemesh.get_nb_layers();
+        let layer_0 = self.spacemesh.get_layer(0);
+        let nb_cells = layer_0.get_nb_cells();
+        // allocate benefit array in one array as we will need a sort! with par_sort_unstable from rayon
+        // the nb_layers of a given cell are stored contiguously in the order obtained from the iterator
+        let benefits = Vec::<usize>::with_capacity(nb_cells * nb_layers);
+        // loop on cells of layer_0, keeping track of the order
+        let cell_order = Vec::<Vec<u16>>::with_capacity(nb_cells);
+        // for each cell we store potential merge benefit at each level!
 
-    // We need to compute cardinal of the tree rooted at a_i(c) the ancestor at layer i of lowest cell c (at layer 0)
-    // This is equivalent to computing cardinal of each subtree. The result is contained in the structure SpaceMesh
-    // as :
-    // - we know the number of points in each cell
-    // - knowing the index of cell c at layer i we can deduce the index of parent cell at layer j < i (take  indexes modulo 2^(i-j))
-    //
-    fn compute_subtree_cardinals(&self) {}
+        // store benefit array in decreasing order!
+    }
 }

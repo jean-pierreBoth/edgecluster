@@ -176,7 +176,7 @@ where
     }
 
     //
-    pub fn get_layer(&self) -> usize {
+    pub(crate) fn get_layer(&self) -> usize {
         self.layer as usize
     }
 
@@ -191,7 +191,7 @@ where
     } // end of get_cell_weight
 
     /// Return number of points.
-    pub fn get_nb_points(&self) -> usize {
+    pub(crate) fn get_nb_points(&self) -> usize {
         if let Some(points) = self.points_in.as_ref() {
             points.len()
         } else {
@@ -204,13 +204,13 @@ where
     }
 
     // get parent cell in splitting process
-    fn get_upper_cell_index(&self) -> Vec<u16> {
+    pub(crate) fn get_upper_cell_index(&self) -> Vec<u16> {
         assert!(self.layer as usize != self.space.nb_layer - 1);
         self.index.iter().map(|x| x / 2).collect::<Vec<u16>>()
     }
 
     // subtree size are computed by reverse of splitting in SpaceMesh::compute_subtree_size
-    fn get_subtree_size(&self) -> u32 {
+    pub(crate) fn get_subtree_size(&self) -> u32 {
         self.subtree_size
     }
 
@@ -300,7 +300,7 @@ where
 //======
 
 /// a layer gathers nodes if a given layer.
-struct Layer<'a, T> {
+pub(crate) struct Layer<'a, T> {
     space: &'a Space,
     // my layer
     layer: u16,
@@ -358,7 +358,7 @@ where
         self.hcells.par_iter_mut()
     }
 
-    fn get_nb_cells(&self) -> usize {
+    pub(crate) fn get_nb_cells(&self) -> usize {
         self.hcells.len()
     }
 
@@ -464,6 +464,11 @@ where
     pub fn get_layer_max(&self) -> u16 {
         self.layer_max
     }
+
+    pub(crate) fn get_layer(&self, l: u16) -> &Layer<'a, T> {
+        &self.layers[0]
+    }
+
     pub fn get_nb_layers(&self) -> usize {
         self.layer_max as usize + 1
     }
@@ -558,7 +563,7 @@ where
         for l in (1..self.get_nb_layers()).rev() {
             log::info!("splitting layer : l : {}", l);
             let lower_layer = &self.layers[l - 1];
-            // changing into_iter to into_par_iter is sufficient to get //. (*5 in cargo test)
+            // TODO: changing into_iter to into_par_iter is sufficient to get //.
             self.layers[l]
                 .get_hcells()
                 .into_par_iter()
@@ -611,8 +616,9 @@ where
             log::info!(" at layer l : {}", l);
             let layer_down = &self.layers[l - 1];
             // we must iterate on each cell in lower layer and maintain count contribution to upper layer
-            let count_by_idx = DashMap::<Vec<u16>, u32>::new();
-            // use // iterator
+            let mut count_by_idx = std::sync::Arc::new(DashMap::<Vec<u16>, u32>::new());
+            //  change from into_iter to into_par_iter  to use // iterator
+            // TODO: into_par_iter makes some points around 2/10_000 weight) missing in upper layer
             layer_down.get_hcells().into_par_iter().for_each(|cell| {
                 let upper_idx = cell.get_upper_cell_index();
                 if let Some(mut count) = count_by_idx.get_mut(&upper_idx) {
@@ -624,15 +630,19 @@ where
             // now we have to dispatch info into upper cells. We iterate on count_by_idx
             let layer_up = &self.layers[l];
             // change from iter_mut to par_iter_mut to get //
-            layer_up.get_hcells().iter_mut().for_each(|mut upper_cell| {
-                let idx = upper_cell.get_cell_index();
-                if let Some(count) = count_by_idx.get(idx) {
-                    upper_cell.subtree_size = *count;
-                } else {
-                    log::error!("upper cell have null subtree, cell index : {:?}", idx);
-                    std::panic!("internal error");
-                }
-            });
+            layer_up
+                .get_hcells()
+                .par_iter_mut()
+                .for_each(|mut upper_cell| {
+                    let idx = upper_cell.get_cell_index();
+                    if let Some(count) = count_by_idx.get(idx) {
+                        upper_cell.subtree_size = *count;
+                    } else {
+                        // every cell in upper cell must be reference!
+                        log::error!("upper cell have null subtree, cell index : {:?}", idx);
+                        std::panic!("internal error");
+                    }
+                });
             // check upper layer cardinality
             self.get_subtree_size(l as u16);
         }
@@ -753,7 +763,7 @@ mod tests {
         log_init_test();
         log::info!("in test_uniform_random");
         //
-        let nbvec = 10000usize;
+        let nbvec = 40_000_000usize;
         let dim = 10;
         let width: f64 = 1000.;
         let mindist = 5.;
@@ -774,6 +784,24 @@ mod tests {
         //
         mesh.compute_subtree_size();
     } //end of test_uniform_random
+
+    #[test]
+    fn chech_dashmap() {
+        let size = 10_000_000;
+        let data = vec![1u32; size];
+        let hmap = DashMap::<usize, u32>::new();
+        (0..size).into_par_iter().for_each(|i| {
+            let res = hmap.insert(i, data[i]);
+        });
+
+        //
+        let total: usize = hmap.into_par_iter().map(|cell| cell.1 as usize).sum();
+        println!(
+            "total : {}, should be  : {}",
+            total,
+            data.into_iter().sum::<u32>()
+        );
+    }
 
     #[test]
     fn check_mindist() {
