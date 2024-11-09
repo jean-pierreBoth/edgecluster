@@ -146,6 +146,8 @@ where
 /// space is split in cells , at upper layer  there is one cell for the whole space
 /// at layer 0 cells have size corresponding to mindist, so a cell, even at layer 0 can have more than one point
 /// (they must be lesst than mindist apart)
+/// - knowing the index of cell c at layer i we can deduce the index of parent cell at layer j < i (take  indexes modulo 2^(i-j))
+
 #[derive(Debug, Clone)]
 pub(crate) struct Cell<'a, T> {
     space: &'a Space,
@@ -153,6 +155,8 @@ pub(crate) struct Cell<'a, T> {
     layer: u16,
     /// a vector of dimension d, giving center of cell in the mesh coordinates
     index: Vec<u16>,
+    //
+    subtree_size: u32,
     //
     points_in: Option<Vec<&'a Point<T>>>,
 }
@@ -166,6 +170,7 @@ where
             space,
             layer,
             index,
+            subtree_size: 0,
             points_in: None,
         }
     }
@@ -196,6 +201,17 @@ where
 
     fn get_cell_index(&self) -> &[u16] {
         &self.index
+    }
+
+    // get parent cell in splitting process
+    fn get_upper_cell_index(&self) -> Vec<u16> {
+        assert!(self.layer as usize != self.space.nb_layer - 1);
+        self.index.iter().map(|x| x / 2).collect::<Vec<u16>>()
+    }
+
+    // subtree size are computed by reverse of splitting in SpaceMesh::compute_subtree_size
+    fn get_subtree_size(&self) -> u32 {
+        self.subtree_size
     }
 
     // adds a point in cell
@@ -373,8 +389,8 @@ where
 /// Space is seen at different resolution, each resolution is finer with each cell size divided by 2.
 /// The coarser mesh will be upper layer.
 ///
-/// The algo will slice space in different layers with cells side decreasing by a factor 2 at each layer
-/// Cells are nodes in a tree, each cell , if some data is present, will have children in lower cells.
+/// Cells are nodes in a tree, each cell , if some data is present in a cell, it is split and propagated at lower layer
+/// and points are dispatched in new (smaller) cells.
 pub struct SpaceMesh<'a, T: Float> {
     space: &'a Space,
     // leaves are at 0, root node will be above layer_max (at fictitious level nb_layers)
@@ -576,6 +592,65 @@ where
             );
         }
     }
+
+    // we need to compute cardinal of each subtree (all descendants of each cell)
+    // We do the reverse of splitting process. We go upward from the lower layer to upper layer.
+    fn compute_subtree_size(&self) {
+        //
+        log::info!("in compute_subtree_size ");
+        // loop on layers, first layer 0
+        let low = 0;
+        let layer_down = &self.layers[0];
+        layer_down.get_hcells().par_iter_mut().for_each(|mut cell| {
+            cell.subtree_size = cell.points_in.as_ref().unwrap().len() as u32;
+        });
+        //
+        self.get_subtree_size(0);
+        //
+        for l in 1..self.get_nb_layers() {
+            log::info!(" at layer l : {}", l);
+            let layer_down = &self.layers[l - 1];
+            // we must iterate on each cell in lower layer and maintain count contribution to upper layer
+            let count_by_idx = DashMap::<Vec<u16>, u32>::new();
+            // use // iterator
+            layer_down.get_hcells().into_par_iter().for_each(|cell| {
+                let upper_idx = cell.get_upper_cell_index();
+                if let Some(mut count) = count_by_idx.get_mut(&upper_idx) {
+                    *count += cell.get_subtree_size();
+                } else {
+                    count_by_idx.insert(upper_idx.clone(), cell.get_subtree_size());
+                }
+            });
+            // now we have to dispatch info into upper cells. We iterate on count_by_idx
+            let layer_up = &self.layers[l];
+            // change from iter_mut to par_iter_mut to get //
+            layer_up.get_hcells().iter_mut().for_each(|mut upper_cell| {
+                let idx = upper_cell.get_cell_index();
+                if let Some(count) = count_by_idx.get(idx) {
+                    upper_cell.subtree_size = *count;
+                } else {
+                    log::error!("upper cell have null subtree, cell index : {:?}", idx);
+                    std::panic!("internal error");
+                }
+            });
+            // check upper layer cardinality
+            self.get_subtree_size(l as u16);
+        }
+        // check upper layer cardinality
+        self.get_subtree_size(self.get_layer_max());
+    } // end of compute_subtree_cardinals
+
+    // sum of sub tree size as seen from layer l. Used for debugging purpose
+    fn get_subtree_size(&self, l: u16) -> u32 {
+        let size: u32 = self.layers[l as usize]
+            .get_hcells()
+            .iter()
+            .map(|mesh_cell| mesh_cell.get_subtree_size())
+            .sum();
+        log::info!("total sub tree size at layer l : {} = {}", l, size);
+        //
+        size
+    }
 } // end of impl SpaceMesh
 
 //===========================
@@ -611,14 +686,6 @@ fn check_space<T: Float + Debug>(space: &Space, points: &[Point<T>]) {
 } // end of check_space
 
 //=======
-
-struct CostBenefit {}
-//
-// All points coordinates are in [-xmin, xmax]^d
-// lower layer (leaves) is 0 and correspond to smaller cells
-// the number of layers is log2(width/mindist)
-// a cell coordinate have value between 0 and log2(ratio)
-//
 
 /*
 
@@ -689,7 +756,7 @@ mod tests {
         let nbvec = 10000usize;
         let dim = 10;
         let width: f64 = 1000.;
-        let mindist = 0.1;
+        let mindist = 5.;
         let unif_01 = Uniform::<f64>::new(0., width);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         let mut points: Vec<Point<f64>> = Vec::with_capacity(nbvec);
@@ -699,13 +766,13 @@ mod tests {
         }
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         // Space definition
-        let space = Space::new(dim, 0., width, 0.1);
+        let space = Space::new(dim, 0., width, mindist);
 
         let mut mesh = SpaceMesh::new(&space, refpoints);
         mesh.embed();
         mesh.summary();
-
         //
+        mesh.compute_subtree_size();
     } //end of test_uniform_random
 
     #[test]

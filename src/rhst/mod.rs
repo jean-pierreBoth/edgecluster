@@ -4,4 +4,6 @@
 //!  - Probabilistic approximation of metric spaces and its algorithmic applications
 //!      Bartal Y.  1996.
 //!  - Algorithms for dynamic geometric problems over data streams. Indyk 2004.
+
+pub mod cluster;
 pub mod rhst2;
