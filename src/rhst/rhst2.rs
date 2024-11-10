@@ -616,7 +616,7 @@ where
             log::info!(" at layer l : {}", l);
             let layer_down = &self.layers[l - 1];
             // we must iterate on each cell in lower layer and maintain count contribution to upper layer
-            let mut count_by_idx = std::sync::Arc::new(DashMap::<Vec<u16>, u32>::new());
+            let mut count_by_idx = DashMap::<Vec<u16>, u32>::new();
             //  change from into_iter to into_par_iter  to use // iterator
             // TODO: into_par_iter makes some points around 2/10_000 weight) missing in upper layer
             layer_down.get_hcells().into_par_iter().for_each(|cell| {
@@ -624,7 +624,11 @@ where
                 if let Some(mut count) = count_by_idx.get_mut(&upper_idx) {
                     *count += cell.get_subtree_size();
                 } else {
-                    count_by_idx.insert(upper_idx.clone(), cell.get_subtree_size());
+                    let old_count = count_by_idx.insert(upper_idx.clone(), cell.get_subtree_size());
+                    // This solves the non absolute locking of Dashmap! causing weight missing problem
+                    if let Some(mut count) = old_count {
+                        *count_by_idx.get_mut(&upper_idx).unwrap() += count;
+                    }
                 }
             });
             // now we have to dispatch info into upper cells. We iterate on count_by_idx
