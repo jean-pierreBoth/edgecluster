@@ -209,6 +209,13 @@ where
         self.index.iter().map(|x| x / 2).collect::<Vec<u16>>()
     }
 
+    // get parent cell in splitting process
+    pub(crate) fn get_upper_cell_index_at_layer(&self, l: u16) -> Vec<u16> {
+        assert!(self.layer < l && (l as usize) < self.space.nb_layer);
+        let factor = 2_u16.pow((l - self.layer) as u32);
+        self.index.iter().map(|x| x / factor).collect::<Vec<u16>>()
+    }
+
     // subtree size are computed by reverse of splitting in SpaceMesh::compute_subtree_size
     pub(crate) fn get_subtree_size(&self) -> u32 {
         self.subtree_size
@@ -344,8 +351,8 @@ where
     // returns a dashmap Ref to cell is it exist
     // used only to check coherence. Sub cells are created inside one thread.
     // TODO: do we need dashmap?
-    fn get_cell(&self, position: &[u16]) -> Option<one::Ref<Vec<u16>, Cell<'a, T>>> {
-        self.hcells.get(position)
+    pub(crate) fn get_cell(&self, index: &[u16]) -> Option<one::Ref<Vec<u16>, Cell<'a, T>>> {
+        self.hcells.get(index)
     }
 
     // get an iterator over cells
@@ -366,7 +373,7 @@ where
         self.cell_diameter
     }
 
-    fn get_hcells(&self) -> &DashMap<Vec<u16>, Cell<'a, T>> {
+    pub(crate) fn get_hcells(&self) -> &DashMap<Vec<u16>, Cell<'a, T>> {
         &self.hcells
     }
     // count points in layer
@@ -466,7 +473,7 @@ where
     }
 
     pub(crate) fn get_layer(&self, l: u16) -> &Layer<'a, T> {
-        &self.layers[0]
+        &self.layers[l as usize]
     }
 
     pub fn get_nb_layers(&self) -> usize {
@@ -499,13 +506,13 @@ where
     } // end get_cell_index
 
     // return reference to dashmap entry
-    fn get_cell(&self, p: &[T], l: usize) -> Option<one::Ref<Vec<u16>, Cell<'a, T>>> {
+    fn get_cell_with_position(&self, p: &[T], l: usize) -> Option<one::Ref<Vec<u16>, Cell<'a, T>>> {
         let idx = self.get_cell_index(p, l);
         self.layers[l].get_cell(&idx)
     }
 
     /// for layer 0, the layer with the maximum number of cells,
-    /// the diameter of a cell is $$ width * \sqrt(d)/2^(nb_layer - layer_max)  $$
+    /// the diameter of a cell is $$ width * \sqrt(d)/2^(nb_layer + 1 - layer)  $$
     ///  - Delta max value of  extension by dimension
     ///  - d : dimension of space
     ///  - l : layer num in 0..nb_layer
@@ -515,11 +522,6 @@ where
         let cell_diameter: f64 = (self.space.get_width() * (self.space.get_dim() as f64).sqrt())
             / 2_u16.pow((self.layer_max + 1 - layer) as u32) as f64;
         cell_diameter
-    }
-
-    // we propagate cell of  upper layer (index 0 in vec) to lower (smaller cells) layers
-    fn upper_layer_downward(&'a self, cell: &Cell<T>) {
-        let upper_layer = self.layers.last().unwrap();
     }
 
     /// this function embeds data in a 2-rhst
@@ -850,8 +852,8 @@ mod tests {
         let p = vec![0.001; dim];
         log::info!("cells info for p : {:?}", p);
         for l in (0..mesh.get_layer_max() as usize).rev() {
-            let refcell = mesh.get_cell(&p, l);
-            if let Some(cell) = mesh.get_cell(&p, l) {
+            let refcell = mesh.get_cell_with_position(&p, l);
+            if let Some(cell) = mesh.get_cell_with_position(&p, l) {
                 let nbpoints_in = refcell.unwrap().value().get_nb_points();
                 log::info!(
                     "nb point in cell corresponding to point at layer {} : {}",
