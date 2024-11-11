@@ -601,59 +601,18 @@ where
     }
 
     // we need to compute cardinal of each subtree (all descendants of each cell)
-    // We do the reverse of splitting process. We go upward from the lower layer to upper layer.
+    // just dispatch number of points
     fn compute_subtree_size(&self) {
         //
         log::info!("in compute_subtree_size ");
-        // loop on layers, first layer 0
-        let low = 0;
-        let layer_down = &self.layers[0];
-        layer_down.get_hcells().par_iter_mut().for_each(|mut cell| {
-            cell.subtree_size = cell.points_in.as_ref().unwrap().len() as u32;
-        });
-        //
-        self.get_subtree_size(0);
-        //
-        for l in 1..self.get_nb_layers() {
-            log::info!(" at layer l : {}", l);
-            let layer_down = &self.layers[l - 1];
-            // we must iterate on each cell in lower layer and maintain count contribution to upper layer
-            let mut count_by_idx = DashMap::<Vec<u16>, u32>::new();
-            //  change from into_iter to into_par_iter  to use // iterator
-            // TODO: into_par_iter makes some points around 2/10_000 weight) missing in upper layer
-            layer_down.get_hcells().into_par_iter().for_each(|cell| {
-                let upper_idx = cell.get_upper_cell_index();
-                if let Some(mut count) = count_by_idx.get_mut(&upper_idx) {
-                    *count += cell.get_subtree_size();
-                } else {
-                    let old_count = count_by_idx.insert(upper_idx.clone(), cell.get_subtree_size());
-                    // This solves the non absolute locking of Dashmap! causing weight missing problem
-                    if let Some(mut count) = old_count {
-                        *count_by_idx.get_mut(&upper_idx).unwrap() += count;
-                    }
-                }
+        for l in 0..self.get_nb_layers() {
+            let layer = &self.layers[l];
+            layer.get_hcells().par_iter_mut().for_each(|mut cell| {
+                cell.subtree_size = cell.points_in.as_ref().unwrap().len() as u32;
             });
-            // now we have to dispatch info into upper cells. We iterate on count_by_idx
-            let layer_up = &self.layers[l];
-            // change from iter_mut to par_iter_mut to get //
-            layer_up
-                .get_hcells()
-                .par_iter_mut()
-                .for_each(|mut upper_cell| {
-                    let idx = upper_cell.get_cell_index();
-                    if let Some(count) = count_by_idx.get(idx) {
-                        upper_cell.subtree_size = *count;
-                    } else {
-                        // every cell in upper cell must be reference!
-                        log::error!("upper cell have null subtree, cell index : {:?}", idx);
-                        std::panic!("internal error");
-                    }
-                });
-            // check upper layer cardinality
             self.get_subtree_size(l as u16);
         }
-        // check upper layer cardinality
-        self.get_subtree_size(self.get_layer_max());
+        log::info!("exiting compute_subtree_size ");
     } // end of compute_subtree_cardinals
 
     // sum of sub tree size as seen from layer l. Used for debugging purpose
