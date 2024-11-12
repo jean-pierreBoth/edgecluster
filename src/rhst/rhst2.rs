@@ -137,6 +137,19 @@ where
     pub fn get_position(&self) -> &[T] {
         &self.p
     }
+
+    /// get minima and maxima of coordinates over all dimensions
+    pub fn get_minmax(&self) -> (T, T) {
+        self.p
+            .iter()
+            .fold((T::max_value(), T::min_value()), |acc, x| {
+                (acc.0.min(*x), acc.0.max(*x))
+            })
+    }
+
+    pub fn get_dimension(&self) -> usize {
+        self.p.len()
+    }
 } // end of impl Point
 
 //====
