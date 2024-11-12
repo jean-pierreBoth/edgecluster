@@ -12,43 +12,6 @@ use num_traits::{cast::AsPrimitive, Float};
 use super::point::*;
 use super::rhst2::*;
 
-/// base unit for counting cost.
-/// cell is a layer 0 cell, layer is cost of upper tree of cell observed at layer l
-struct CostUnit {
-    cell_index: Vec<u16>,
-    layer: u16,
-    cost: u32,
-}
-
-impl CostUnit {
-    fn new(cell_index: Vec<u16>, layer: u16, cost: u32) -> Self {
-        CostUnit {
-            cell_index,
-            layer,
-            cost,
-        }
-    }
-}
-
-//===============
-
-// This structure drives the merge procedure of subtrees in spacemesh
-struct CostBenefit<'a, 'b, T: Float> {
-    //
-    spacemesh: &'b SpaceMesh<'a, T>,
-    //
-}
-
-impl<'a, 'b, T> CostBenefit<'a, 'b, T>
-where
-    T: Float + Sync + std::fmt::Debug,
-    'a: 'b,
-{
-    fn new(spacemesh: &'b SpaceMesh<'a, T>) -> Self {
-        CostBenefit { spacemesh }
-    }
-}
-
 //==========================
 
 pub struct Hcluster<'a, T> {
@@ -59,10 +22,9 @@ pub struct Hcluster<'a, T> {
     mindist: f64,
 }
 
-impl<'a, 'b, T> Hcluster<'a, T>
+impl<'a, T> Hcluster<'a, T>
 where
     T: Float + std::fmt::Debug + Sync + Send,
-    'b: 'a,
 {
     pub fn new(points: Vec<&'a Point<T>>) -> Self {
         // construct space
@@ -76,10 +38,15 @@ where
         //
         let xmin: f64 = xmin.to_f64().unwrap();
         let xmax: f64 = xmax.to_f64().unwrap();
-        log::debug!("xmin : {:.3e}, xmax : {:.3e}", xmin, xmax);
         // construct spacemesh
         let dim = points[0].get_dimension();
-        let space = Space::new(dim, xmin, xmax, 0.);
+        log::info!(
+            "dimension : {}, xmin : {:.3e}, xmax : {:.3e}",
+            dim,
+            xmin,
+            xmax
+        );
+        let space = Space::new(dim, xmin, xmax, (xmax - xmin) / 100.);
         Hcluster {
             points,
             space,
@@ -87,7 +54,7 @@ where
         }
     } // end of new
 
-    pub fn cluster(&'b self, mindist: f64) {
+    pub fn cluster(&self, mindist: f64) {
         // construct space
         let (xmin, xmax) = self
             .points
@@ -109,7 +76,7 @@ where
         spacemesh.embed();
         //
         spacemesh.summary();
-        spacemesh.compute_benefits();
+        let benefits = spacemesh.compute_benefits();
         //
         //        let cost_analysis = CostBenefit::<'a, 'b, T>::new(&spacemesh);
         //
