@@ -6,4 +6,5 @@
 //!  - Algorithms for dynamic geometric problems over data streams. Indyk 2004.
 
 pub mod cluster;
+pub mod point;
 pub mod rhst2;

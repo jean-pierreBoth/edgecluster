@@ -15,12 +15,10 @@ use std::fmt::Debug;
 use dashmap::{iter, mapref::one, rayon::*, DashMap};
 use ego_tree::{tree, NodeMut, Tree};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::*;
 use std::collections::HashMap;
 
-type NodeId = usize;
-
-/// data to cluster identifier
-pub type PointId = usize;
+use super::point::*;
 
 #[cfg_attr(doc, katexit::katexit)]
 /// structure describing space in which data point are supposed to live.
@@ -106,53 +104,6 @@ impl Space {
         self.xmin
     }
 }
-
-//================================================
-
-// TODO: possibly Point should store only a ref to data?
-
-#[derive(Debug, Clone)]
-pub struct Point<T> {
-    // id to identify points as coming from external client
-    id: PointId,
-    /// data point
-    p: Vec<T>,
-    /// original label
-    label: u32,
-}
-
-impl<T> Point<T>
-where
-    T: Float + Debug,
-{
-    pub fn new(id: PointId, p: Vec<T>, label: u32) -> Self {
-        Point { id, p, label }
-    }
-    /// get the original label
-    pub fn get_label(&self) -> u32 {
-        self.label
-    }
-
-    /// gets the points coordinate
-    pub fn get_position(&self) -> &[T] {
-        &self.p
-    }
-
-    /// get minima and maxima of coordinates over all dimensions
-    pub fn get_minmax(&self) -> (T, T) {
-        self.p
-            .iter()
-            .fold((T::max_value(), T::min_value()), |acc, x| {
-                (acc.0.min(*x), acc.0.max(*x))
-            })
-    }
-
-    pub fn get_dimension(&self) -> usize {
-        self.p.len()
-    }
-} // end of impl Point
-
-//====
 
 //========================================
 
@@ -401,6 +352,26 @@ where
 
 //============================
 
+/// base unit for counting cost.
+/// cell is a layer 0 cell, layer is cost of upper tree of cell observed at layer l
+pub(crate) struct CostUnit {
+    cell_index: Vec<u16>,
+    layer: u16,
+    cost: u32,
+}
+
+impl CostUnit {
+    fn new(cell_index: Vec<u16>, layer: u16, cost: u32) -> Self {
+        CostUnit {
+            cell_index,
+            layer,
+            cost,
+        }
+    }
+}
+
+//===========================
+
 //TODO: space must provide for random shift!!!
 
 #[cfg_attr(doc, katexit::katexit)]
@@ -423,7 +394,7 @@ pub struct SpaceMesh<'a, T: Float> {
     points: Option<Vec<&'a Point<T>>>,
     // benefit of each couple (point rank, layer)
     // benefits[r][l] gives  gives benefit of point of rank r in points at layer l
-    benefits: Option<Vec<Vec<f32>>>,
+    //    benefits: Option<Vec<Vec<f32>>>,
 }
 
 impl<'a, T> SpaceMesh<'a, T>
@@ -458,7 +429,6 @@ where
             global_cell: None,
             layers,
             points: Some(points),
-            benefits: None,
         }
     }
 
@@ -590,6 +560,7 @@ where
                 });
         }
         //
+        self.compute_subtree_size();
         log::info!("end of downward cell propagation");
         //
     } // end of embed
@@ -612,6 +583,48 @@ where
             );
         }
     }
+
+    // compute benefits by points (in fact cells at layer 0) and layer (See algo 2 of paper and lemma 3.4)
+    pub(crate) fn compute_benefits(&self) -> Vec<CostUnit> {
+        //
+        log::info!("in compute_benefits");
+        //
+        let nb_layers = self.get_nb_layers();
+        let layer_0 = self.get_layer(0);
+        let nb_cells = layer_0.get_nb_cells();
+        // allocate benefit array in one array as we will need a sort! with par_sort_unstable from rayon
+        // the nb_layers of a given cell are stored contiguously in the order obtained from the iterator
+        let benefits = Vec::<usize>::with_capacity(nb_cells * nb_layers);
+        // loop on cells of layer_0, keeping track of the order
+        let cell_order = Vec::<Vec<u16>>::with_capacity(nb_cells);
+        // for each cell we store potential merge benefit at each level!
+        let mut benefits: Vec<CostUnit> = Vec::with_capacity(nb_cells * nb_layers);
+        // iterate over layer 0 and upper_layers store cost and then sort benefit array in decreasing order!
+        let layer0 = self.get_layer(0);
+        for cell in layer0.get_hcells().iter() {
+            let mut benefit_at_layer = Vec::<u32>::with_capacity(nb_layers);
+            let mut previous_tree_size: u32 = cell.get_subtree_size();
+            for l in 1..self.get_nb_layers() {
+                let upper_index = cell.get_upper_cell_index_at_layer(l as u16);
+                let upper_cell = self.get_layer(l as u16).get_cell(&upper_index).unwrap();
+                upper_cell.get_subtree_size();
+                // we can unroll benefit computation ( and lyer 0 give no benefit)
+                let benefit =
+                    2u32.pow(l as u32) * previous_tree_size + benefit_at_layer.last().unwrap_or(&0);
+                benefit_at_layer.push(benefit);
+                benefits.push(CostUnit::new(cell.key().clone(), l as u16, benefit));
+            }
+        }
+        // sort benefits in decreasing (!) order
+        log::info!("sorting benefits");
+        benefits.par_sort_unstable_by(|unita, unitb| unitb.cost.partial_cmp(&unita.cost).unwrap());
+        //
+        log::info!("benefits vector size : {}", benefits.len());
+        assert!(benefits[0].cost >= benefits[1].cost);
+        //
+        log::info!("exiting compute_benefits");
+        benefits
+    } // end of compute_benefits
 
     // we need to compute cardinal of each subtree (all descendants of each cell)
     // just dispatch number of points
@@ -673,52 +686,6 @@ fn check_space<T: Float + Debug>(space: &Space, points: &[Point<T>]) {
     );
 } // end of check_space
 
-//=======
-
-/*
-
-//
-pub(crate) struct Tree<'a, T: Float> {
-    // space description
-    space: Space,
-    // largest coordinate value
-    root: Node<'a>,
-    // nodes indexed by their id
-    layers: Vec<Layer<'a>>,
-    // random shift
-    rshift: [T; 3],
-}
-
-impl<'a, T> Tree<'a, T>
-where
-    T: Float,
-{
-    pub fn new(points: Vec<Point<T>>, mindist: f64) -> Self {
-        // determine space,
-        // allocate benefits, root node, layers
-        // sample rshift
-        panic!("not yet implemented");
-    }
-
-    // return indices of cell at cells
-    fn get_cell_at_layer(&'a self, point: &[T], layer: usize) -> Cell<'a> {
-        self.space.get_cell(point, layer)
-    }
-
-    /// insert a set of points and do clusterization
-    pub fn cluster_set(&mut self, points: &[Vec<T>]) -> anyhow::Result<()> {
-        panic!("not yet implemented")
-    }
-
-    /// generate random shift
-    fn generate_shift(&mut self) -> Vec<T> {
-        panic!("not yet implemented");
-    }
-} // end of impl Tree
-
-
-*/
-
 //========================================================
 
 #[cfg(test)]
@@ -761,6 +728,8 @@ mod tests {
         mesh.summary();
         //
         mesh.compute_subtree_size();
+        //
+        let benefits = mesh.compute_benefits();
     } //end of test_uniform_random
 
     #[test]

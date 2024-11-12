@@ -9,6 +9,7 @@ use rayon::prelude::*;
 // The algorithms is translated
 use num_traits::{cast::AsPrimitive, Float};
 
+use super::point::*;
 use super::rhst2::*;
 
 /// base unit for counting cost.
@@ -32,51 +33,20 @@ impl CostUnit {
 //===============
 
 // This structure drives the merge procedure of subtrees in spacemesh
-struct CostBenefit<'a, T: Float> {
+struct CostBenefit<'a, 'b, T: Float> {
     //
-    spacemesh: &'a SpaceMesh<'a, T>,
+    spacemesh: &'b SpaceMesh<'a, T>,
     //
 }
 
-impl<'a, T> CostBenefit<'a, T>
+impl<'a, 'b, T> CostBenefit<'a, 'b, T>
 where
     T: Float + Sync + std::fmt::Debug,
+    'a: 'b,
 {
-    // compute benefits by points (in fact cells at layer 0) and layer (See algo 2 of paper and lemma 3.4)
-    fn compute_benefits(&self) {
-        let nb_layers = self.spacemesh.get_nb_layers();
-        let layer_0 = self.spacemesh.get_layer(0);
-        let nb_cells = layer_0.get_nb_cells();
-        // allocate benefit array in one array as we will need a sort! with par_sort_unstable from rayon
-        // the nb_layers of a given cell are stored contiguously in the order obtained from the iterator
-        let benefits = Vec::<usize>::with_capacity(nb_cells * nb_layers);
-        // loop on cells of layer_0, keeping track of the order
-        let cell_order = Vec::<Vec<u16>>::with_capacity(nb_cells);
-        // for each cell we store potential merge benefit at each level!
-        let mut benefits: Vec<CostUnit> = Vec::with_capacity(nb_cells * nb_layers);
-        // iterate over layer 0 and upper_layers store cost and then sort benefit array in decreasing order!
-        let layer0 = self.spacemesh.get_layer(0);
-        for cell in layer0.get_hcells().iter() {
-            let mut benefit_at_layer = Vec::<u32>::with_capacity(nb_layers);
-            let mut previous_tree_size: u32 = cell.get_subtree_size();
-            for l in 1..self.spacemesh.get_nb_layers() {
-                let upper_index = cell.get_upper_cell_index_at_layer(l as u16);
-                let upper_cell = self
-                    .spacemesh
-                    .get_layer(l as u16)
-                    .get_cell(&upper_index)
-                    .unwrap();
-                upper_cell.get_subtree_size();
-                // we can unroll benefit computation ( and lyer 0 give no benefit)
-                let benefit =
-                    2u32.pow(l as u32) * previous_tree_size + benefit_at_layer.last().unwrap();
-                benefit_at_layer.push(benefit);
-                benefits.push(CostUnit::new(cell.key().clone(), l as u16, benefit));
-            }
-        }
-        // sort benefits in decreasing (!) order
-        benefits.par_sort_unstable_by(|unita, unitb| unitb.cost.partial_cmp(&unita.cost).unwrap());
-    } // end of compute_benefits
+    fn new(spacemesh: &'b SpaceMesh<'a, T>) -> Self {
+        CostBenefit { spacemesh }
+    }
 }
 
 //==========================
@@ -84,18 +54,40 @@ where
 pub struct Hcluster<'a, T> {
     points: Vec<&'a Point<T>>,
     //
-    nbcluster: usize,
+    space: Space,
+    //
+    mindist: f64,
 }
 
-impl<'a, T> Hcluster<'a, T>
+impl<'a, 'b, T> Hcluster<'a, T>
 where
     T: Float + std::fmt::Debug + Sync + Send,
+    'b: 'a,
 {
-    pub fn new(points: Vec<&'a Point<T>>, nbcluster: usize) -> Self {
-        Hcluster { points, nbcluster }
+    pub fn new(points: Vec<&'a Point<T>>) -> Self {
+        // construct space
+        let (xmin, xmax) = points
+            .iter()
+            .map(|p| p.get_minmax())
+            .into_iter()
+            .fold((T::max_value(), T::min_value()), |acc, x| {
+                (acc.0.min(x.0), acc.0.max(x.1))
+            });
+        //
+        let xmin: f64 = xmin.to_f64().unwrap();
+        let xmax: f64 = xmax.to_f64().unwrap();
+        log::debug!("xmin : {:.3e}, xmax : {:.3e}", xmin, xmax);
+        // construct spacemesh
+        let dim = points[0].get_dimension();
+        let space = Space::new(dim, xmin, xmax, 0.);
+        Hcluster {
+            points,
+            space,
+            mindist: 0.,
+        }
     } // end of new
 
-    pub fn cluster(&mut self, mindist: f64) {
+    pub fn cluster(&'b self, mindist: f64) {
         // construct space
         let (xmin, xmax) = self
             .points
@@ -112,7 +104,57 @@ where
         // construct spacemesh
         let dim = self.points[0].get_dimension();
         let space = Space::new(dim, xmin, xmax, mindist);
+        // TODO: do we need to keep points in HCluster (we clone a vec of references)
+        let mut spacemesh = SpaceMesh::new(&self.space, self.points.clone());
+        spacemesh.embed();
         //
-        //       let spacemesh = SpaceMesh::new(&space, self.points);
+        spacemesh.summary();
+        spacemesh.compute_benefits();
+        //
+        //        let cost_analysis = CostBenefit::<'a, 'b, T>::new(&spacemesh);
+        //
     }
 } // end impl Hcluster
+
+//========================================================
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    use rand::distributions::Uniform;
+    use rand::prelude::*;
+    use rand_xoshiro::Xoshiro256PlusPlus;
+
+    use rand_distr::{Distribution, Exp};
+
+    fn log_init_test() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
+    #[test]
+    fn test_cluster_random() {
+        log_init_test();
+        log::info!("in test_uniform_random");
+        //
+        let nbvec = 1_000_000usize;
+        let dim = 10;
+        let width: f64 = 1000.;
+        let mindist = 5.;
+        let unif_01 = Uniform::<f64>::new(0., width);
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
+        let mut points: Vec<Point<f64>> = Vec::with_capacity(nbvec);
+        for i in 0..nbvec {
+            let p: Vec<f64> = (0..dim).map(|_| unif_01.sample(&mut rng)).collect();
+            points.push(Point::<f64>::new(i, p, (i % 5).try_into().unwrap()));
+        }
+        let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
+        // Space definition
+        let space = Space::new(dim, 0., width, mindist);
+        //
+        let hcluster = Hcluster::new(refpoints);
+        hcluster.cluster(mindist);
+        //
+    } //end of test_uniform_random
+} // end of tests
