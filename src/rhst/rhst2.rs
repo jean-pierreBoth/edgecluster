@@ -12,6 +12,7 @@ use num_traits::float::Float;
 
 use std::fmt::Debug;
 
+use anyhow::Result;
 use dashmap::{iter, mapref::one, rayon::*, DashMap};
 use ego_tree::{tree, NodeMut, Tree};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -176,8 +177,11 @@ where
     // get parent cell in splitting process
     pub(crate) fn get_upper_cell_index_at_layer(&self, l: u16) -> Vec<u16> {
         assert!(self.layer < l && (l as usize) < self.space.nb_layer);
-        let factor = 2_u16.pow((l - self.layer) as u32);
-        self.index.iter().map(|x| x / factor).collect::<Vec<u16>>()
+        // compute new index by dividing by 2_u16.pow((l - self.layer) as u32);
+        self.index
+            .iter()
+            .map(|x| x >> (l - self.layer))
+            .collect::<Vec<u16>>()
     }
 
     // subtree size are computed by reverse of splitting in SpaceMesh::compute_subtree_size
@@ -205,10 +209,10 @@ where
     // given layer and index in mesh, returns cooridnates of center of mesh in space
     // at upper layer cell width is space width divided by 2 and so on
     fn get_cell_center(&self) -> Vec<f64> {
-        let exponent: i32 = (self.space.nb_layer - self.layer as usize)
+        let exponent: u32 = (self.space.nb_layer - self.layer as usize)
             .try_into()
             .unwrap();
-        let cell_width = self.space.width / 2.0_f64.powi(exponent);
+        let cell_width = self.space.width / (2u32.pow(exponent) as f64);
         let position: Vec<f64> = (0..self.space.dim)
             .map(|i| 0.5 * cell_width + self.index[i] as f64 * self.space.width)
             .collect();
@@ -353,20 +357,74 @@ where
 //============================
 
 /// base unit for counting cost.
-/// cell is a layer 0 cell, layer is cost of upper tree of cell observed at layer l
-pub(crate) struct CostUnit {
+/// cell is a layer 0 cell, cell_index is index at layer 0, (it mimics a point),
+/// benefit is benefit observed along the path from layer 0 to parent cell observed at layer l
+#[derive(Debug, Clone)]
+pub(crate) struct BenefitUnit {
+    // index in layer 0
     cell_index: Vec<u16>,
+    // layer corresponding to observe benefit
     layer: u16,
-    cost: u32,
+    // benefit encountered up to layer
+    benefit: u32,
 }
 
-impl CostUnit {
-    fn new(cell_index: Vec<u16>, layer: u16, cost: u32) -> Self {
-        CostUnit {
+impl BenefitUnit {
+    fn new(cell_index: Vec<u16>, layer: u16, benefit: u32) -> Self {
+        BenefitUnit {
             cell_index,
             layer,
-            cost,
+            benefit,
         }
+    }
+}
+
+// This structure stores, for a  given layer,  for each sub tree rooted at this layer, the layer 0 cell (alias for a point) with max benefit
+pub(crate) struct LayerTreeBest {
+    layer: u16,
+    // at each cell identified by index given by Vec<u16> corresponds the cell (point) at layer 0 having the higher benefit
+    best: HashMap<Vec<u16>, BenefitUnit>,
+}
+
+impl LayerTreeBest {
+    pub fn new_with_size(layer: u16, nbnodes: usize) -> Self {
+        // layer 0 has no subtree
+        assert!(layer > 0);
+        let best: HashMap<Vec<u16>, BenefitUnit> = HashMap::with_capacity(nbnodes);
+        LayerTreeBest { layer, best }
+    }
+
+    pub fn get_layer(&self) -> u16 {
+        self.layer
+    }
+
+    pub fn get_best(&self, idx: &Vec<u16>) -> &BenefitUnit {
+        let res = self.best.get(idx);
+        if res.is_none() {
+            log::error!(
+                "cannot find best point for root tree at layer : {}, index : {:?}",
+                self.layer,
+                idx
+            );
+            panic!("error in RootTreeBest::get_best");
+        };
+        res.unwrap()
+    }
+} // end of LayerTreeBest
+
+pub(crate) struct TreeBest {
+    bylayers: Vec<LayerTreeBest>,
+}
+
+impl TreeBest {
+    pub(crate) fn new(nb_layer: usize) -> Self {
+        let bylayers: Vec<LayerTreeBest> = Vec::with_capacity(nb_layer);
+        TreeBest { bylayers }
+    }
+
+    pub(crate) fn get_best(&self, layer: u16, idx: &Vec<u16>) -> &BenefitUnit {
+        assert!(layer > 0);
+        self.bylayers[(layer - 1) as usize].get_best(idx)
     }
 }
 
@@ -503,7 +561,7 @@ where
         assert!(layer <= self.layer_max);
         //
         let cell_diameter: f64 = (self.space.get_width() * (self.space.get_dim() as f64).sqrt())
-            / 2_u16.pow((self.layer_max + 1 - layer) as u32) as f64;
+            / 2_u32.pow((self.layer_max + 1 - layer) as u32) as f64;
         cell_diameter
     }
 
@@ -585,7 +643,7 @@ where
     }
 
     // compute benefits by points (in fact cells at layer 0) and layer (See algo 2 of paper and lemma 3.4)
-    pub(crate) fn compute_benefits(&self) -> Vec<CostUnit> {
+    pub(crate) fn compute_benefits(&self) -> Vec<BenefitUnit> {
         //
         log::info!("in compute_benefits");
         //
@@ -598,7 +656,7 @@ where
         // loop on cells of layer_0, keeping track of the order
         let cell_order = Vec::<Vec<u16>>::with_capacity(nb_cells);
         // for each cell we store potential merge benefit at each level!
-        let mut benefits: Vec<CostUnit> = Vec::with_capacity(nb_cells * nb_layers);
+        let mut benefits: Vec<BenefitUnit> = Vec::with_capacity(nb_cells * nb_layers);
         // iterate over layer 0 and upper_layers store cost and then sort benefit array in decreasing order!
         let layer0 = self.get_layer(0);
         for cell in layer0.get_hcells().iter() {
@@ -612,15 +670,17 @@ where
                 let benefit =
                     2u32.pow(l as u32) * previous_tree_size + benefit_at_layer.last().unwrap_or(&0);
                 benefit_at_layer.push(benefit);
-                benefits.push(CostUnit::new(cell.key().clone(), l as u16, benefit));
+                benefits.push(BenefitUnit::new(cell.key().clone(), l as u16, benefit));
             }
         }
         // sort benefits in decreasing (!) order
         log::info!("sorting benefits");
-        benefits.par_sort_unstable_by(|unita, unitb| unitb.cost.partial_cmp(&unita.cost).unwrap());
+        benefits.par_sort_unstable_by(|unita, unitb| {
+            unitb.benefit.partial_cmp(&unita.benefit).unwrap()
+        });
         //
         log::info!("benefits vector size : {}", benefits.len());
-        assert!(benefits[0].cost >= benefits[1].cost);
+        assert!(benefits[0].benefit >= benefits[1].benefit);
         //
         log::info!("exiting compute_benefits");
         benefits

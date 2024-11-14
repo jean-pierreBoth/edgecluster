@@ -31,7 +31,6 @@ where
         let (xmin, xmax) = points
             .iter()
             .map(|p| p.get_minmax())
-            .into_iter()
             .fold((T::max_value(), T::min_value()), |acc, x| {
                 (acc.0.min(x.0), acc.0.max(x.1))
             });
@@ -60,7 +59,6 @@ where
             .points
             .iter()
             .map(|p| p.get_minmax())
-            .into_iter()
             .fold((T::max_value(), T::min_value()), |acc, x| {
                 (acc.0.min(x.0), acc.0.max(x.1))
             });
