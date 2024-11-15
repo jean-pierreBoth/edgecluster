@@ -264,12 +264,14 @@ where
             new_cells.push(v);
         }
         //
-        log::debug!(
-            "layer : {}, cell with nb points {:?} splitted in {:?} new cells",
-            self.layer,
-            self.points_in.as_ref().unwrap().len(),
-            new_cells.len()
-        );
+        if new_cells.len() > 1 {
+            log::trace!(
+                "layer : {}, cell with nb points {:?} splitted in {:?} new cells",
+                self.layer,
+                self.points_in.as_ref().unwrap().len(),
+                new_cells.len()
+            );
+        }
         //
         Some(new_cells)
     }

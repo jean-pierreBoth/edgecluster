@@ -3,14 +3,13 @@
 //!
 
 use cpu_time::ProcessTime;
-use std::fmt::Debug;
+use log::Level::Debug;
 use std::time::{Duration, SystemTime};
-
-use std::collections::HashMap;
 
 use dashmap::{iter, mapref::one, rayon::*, DashMap};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rayon::prelude::*;
+use std::collections::HashMap;
 
 // points are assimilated to cells of layer 0. Most cells of layer 0 should have one or very few points.
 // The algorithms is translated
@@ -58,6 +57,11 @@ impl LayerBestTree {
         } else {
             self.best.insert(l_idx, unit.clone());
             if self.best.len() >= self.nb_subtrees {
+                log::debug!(
+                    "LayerBestTree at layer {} full nb sub tress {}",
+                    self.layer,
+                    self.nb_subtrees
+                );
                 true
             } else {
                 false
@@ -93,7 +97,7 @@ impl BestTree {
     //
     pub(crate) fn new<'a, T>(nb_layer: usize, spacemesh: &SpaceMesh<'a, T>) -> Self
     where
-        T: Float + Debug + Sync,
+        T: Float + std::fmt::Debug + Sync,
     {
         let mut bylayers: Vec<LayerBestTree> = Vec::with_capacity(nb_layer);
         for layer in 1..nb_layer {
@@ -116,11 +120,17 @@ impl BestTree {
         let mut nb_full = 0;
         for (i, unit) in benefits.iter().enumerate() {
             //
+            if i <= 10 {
+                if log::log_enabled!(log::Level::Debug) {
+                    log::debug!(" benefit rank : {}, unit : {:?}", i, unit);
+                }
+            }
+            //
             let (idx, l) = unit.get_id();
             assert!(l >= 1);
             let layer = &mut self.bylayers[l as usize - 1];
             // convert idx from layer 0 to layer l
-            let l_idx: Vec<u16> = idx.iter().map(|x| x << l).collect();
+            let l_idx: Vec<u16> = idx.iter().map(|x| x >> l).collect();
             let full = layer.insert(l_idx, unit);
             if full {
                 self.filled[l as usize] = true;
@@ -241,8 +251,8 @@ mod tests {
         log_init_test();
         log::info!("in test_uniform_random");
         //
-        let nbvec = 1_000_000usize;
-        let dim = 10;
+        let nbvec = 10_000_000usize;
+        let dim = 5;
         let width: f64 = 1000.;
         let mindist = 5.;
         let unif_01 = Uniform::<f64>::new(0., width);
