@@ -7,6 +7,9 @@
 //  Zaheer, Guruganesh, Levin Smola
 //  as we can group points very close (under lower distance threshold) in one cell
 
+use cpu_time::ProcessTime;
+use std::time::{Duration, SystemTime};
+
 use num_traits::cast::*;
 use num_traits::float::Float;
 
@@ -59,8 +62,7 @@ impl Space {
             mindist > 0.,
             "mindist cannot be 0, should related to width so that max layer is not too large"
         );
-        let layer_max_u: usize =
-            (dim as f64 * width.sqrt() / mindist).log2().ceil().trunc() as usize;
+        let layer_max_u: usize = ((dim as f64).sqrt() * width / mindist).log2().trunc() as usize;
         let nb_layer = layer_max_u + 1;
         let mut accepted_mindist: f64 = mindist;
         log::info!("nb layer : {}", nb_layer);
@@ -68,13 +70,13 @@ impl Space {
             log::error!("too many layers, mindist is too small");
             accepted_mindist = (dim as f64).sqrt() * width / 2_i32.pow(16) as f64;
             log::warn!("resetting mindist to : {:.3e}", accepted_mindist);
-            let check = (dim as f64 * width.sqrt() / accepted_mindist)
+            let check = ((dim as f64).sqrt() * width / accepted_mindist)
                 .log2()
                 .ceil()
                 .trunc();
             log::info!("check : {:.3e}", check);
             assert!(
-                (dim as f64 * width.sqrt() / accepted_mindist)
+                ((dim as f64).sqrt() * width / accepted_mindist)
                     .log2()
                     .ceil()
                     .trunc() as usize
@@ -131,6 +133,7 @@ where
     T: Float + Debug,
 {
     pub fn new(space: &'a Space, layer: u16, index: Vec<u16>) -> Self {
+        assert!((layer as usize) <= space.nb_layer);
         Cell {
             space,
             layer,
@@ -377,58 +380,12 @@ impl BenefitUnit {
             benefit,
         }
     }
-}
 
-// This structure stores, for a  given layer,  for each sub tree rooted at this layer, the layer 0 cell (alias for a point) with max benefit
-pub(crate) struct LayerTreeBest {
-    layer: u16,
-    // at each cell identified by index given by Vec<u16> corresponds the cell (point) at layer 0 having the higher benefit
-    best: HashMap<Vec<u16>, BenefitUnit>,
-}
-
-impl LayerTreeBest {
-    pub fn new_with_size(layer: u16, nbnodes: usize) -> Self {
-        // layer 0 has no subtree
-        assert!(layer > 0);
-        let best: HashMap<Vec<u16>, BenefitUnit> = HashMap::with_capacity(nbnodes);
-        LayerTreeBest { layer, best }
+    // returns cell index and layer
+    pub(crate) fn get_id(&self) -> (&Vec<u16>, u16) {
+        (&self.cell_index, self.layer)
     }
-
-    pub fn get_layer(&self) -> u16 {
-        self.layer
-    }
-
-    pub fn get_best(&self, idx: &Vec<u16>) -> &BenefitUnit {
-        let res = self.best.get(idx);
-        if res.is_none() {
-            log::error!(
-                "cannot find best point for root tree at layer : {}, index : {:?}",
-                self.layer,
-                idx
-            );
-            panic!("error in RootTreeBest::get_best");
-        };
-        res.unwrap()
-    }
-} // end of LayerTreeBest
-
-pub(crate) struct TreeBest {
-    bylayers: Vec<LayerTreeBest>,
-}
-
-impl TreeBest {
-    pub(crate) fn new(nb_layer: usize) -> Self {
-        let bylayers: Vec<LayerTreeBest> = Vec::with_capacity(nb_layer);
-        TreeBest { bylayers }
-    }
-
-    pub(crate) fn get_best(&self, layer: u16, idx: &Vec<u16>) -> &BenefitUnit {
-        assert!(layer > 0);
-        self.bylayers[(layer - 1) as usize].get_best(idx)
-    }
-}
-
-//===========================
+} // end impl BenefitUnit
 
 //TODO: space must provide for random shift!!!
 
@@ -450,9 +407,6 @@ pub struct SpaceMesh<'a, T: Float> {
     layers: Vec<Layer<'a, T>>,
     //
     points: Option<Vec<&'a Point<T>>>,
-    // benefit of each couple (point rank, layer)
-    // benefits[r][l] gives  gives benefit of point of rank r in points at layer l
-    //    benefits: Option<Vec<Vec<f32>>>,
 }
 
 impl<'a, T> SpaceMesh<'a, T>
@@ -463,21 +417,36 @@ where
     /// - data points to cluster
     /// - mindist to discriminate points. under this distance points will be associated
     ///
-    pub fn new(space: &'a Space, points: Vec<&'a Point<T>>) -> Self {
+    pub fn new(space: &'a mut Space, points: Vec<&'a Point<T>>) -> Self {
         assert!(
             space.mindist > 0.,
             "mindist cannot be 0, should related to width so that max layer is not too large"
         );
-        let layer_max_u: usize = (space.get_dim() as f64 * space.get_width().sqrt() / space.mindist)
+        //
+        let dim: usize = points[0].get_dimension();
+        let recommended_nb_layer: u16 =
+            (((1 + points.len().ilog2()) / dim as u32) + 1).min(15) as u16;
+        log::info!("recommended nb layer : {}", recommended_nb_layer);
+        //
+        let layer_max_u: usize = ((space.get_dim() as f64).sqrt() as f64 * space.get_width()
+            / space.mindist)
             .log2()
-            .ceil()
             .trunc() as usize;
         let nb_layer = layer_max_u + 1;
-        log::info!("nb layer : {}", nb_layer);
+        log::info!("nb layer  for mindist asked : {}", nb_layer);
         if (nb_layer >= 8) {
             log::warn!("perhaps increase mindist to reduce nb_layer");
         }
-        let layer_max: u16 = layer_max_u.try_into().unwrap();
+        let layer_max_scale: u16 = layer_max_u.try_into().unwrap();
+        let layer_max = (layer_max_scale + recommended_nb_layer) / 2;
+        let nb_layer = layer_max;
+        space.mindist = (space.get_dim() as f64).sqrt() as f64 * space.get_width()
+            / 2i32.pow(nb_layer as u32) as f64;
+        log::info!(
+            "setting nb layer to {}, mindist : {:.3e}",
+            nb_layer,
+            space.mindist
+        );
         //
         let mut layers: Vec<Layer<T>> = Vec::with_capacity(layer_max as usize + 1);
         //
@@ -504,6 +473,12 @@ where
         self.space.get_width()
     }
 
+    pub fn get_nb_points(&self) -> usize {
+        match &self.points {
+            Some(vec) => vec.len(),
+            _ => 0,
+        }
+    }
     /// returns maximum layer , or layer of root node
     pub fn get_root_layer(&self) -> u16 {
         self.layer_max
@@ -568,6 +543,9 @@ where
     /// this function embeds data in a 2-rhst
     /// It propagate cells partitioning space from coarser to finer mesh
     pub fn embed(&mut self) {
+        log::info!("SpaceMesh::embed");
+        let cpu_start = ProcessTime::now();
+        let sys_now = SystemTime::now();
         // initialize layers (layer lmax to bottom layer 0
         self.layers = Vec::with_capacity(self.get_nb_layers());
         for l in 0..self.get_nb_layers() {
@@ -616,10 +594,29 @@ where
                         lower_layer.insert_cells(new_cells);
                     }
                 });
+            log::info!(
+                "layer {} has {} nbcells",
+                l - 1,
+                self.layers[l - 1].get_nb_cells()
+            );
+            let nbpt_by_cell: f64 =
+                self.get_nb_points() as f64 / self.layers[l].get_nb_cells() as f64;
+            if nbpt_by_cell <= 2. {
+                log::warn!(
+                    "too many layers asked, nb points by cell : {:.3e}",
+                    nbpt_by_cell
+                );
+            }
         }
         //
         self.compute_subtree_size();
-        log::info!("end of downward cell propagation");
+        log::info!("exiting SpaceMesh::embed");
+        let cpu_time: Duration = cpu_start.elapsed();
+        println!(
+            " SpaceMesh::embed sys time(s) {:?} cpu time {:?}",
+            sys_now.elapsed().unwrap().as_secs(),
+            cpu_time.as_secs()
+        );
         //
     } // end of embed
 
@@ -646,6 +643,8 @@ where
     pub(crate) fn compute_benefits(&self) -> Vec<BenefitUnit> {
         //
         log::info!("in compute_benefits");
+        let cpu_start = ProcessTime::now();
+        let sys_now = SystemTime::now();
         //
         let nb_layers = self.get_nb_layers();
         let layer_0 = self.get_layer(0);
@@ -683,6 +682,13 @@ where
         assert!(benefits[0].benefit >= benefits[1].benefit);
         //
         log::info!("exiting compute_benefits");
+        let cpu_time: Duration = cpu_start.elapsed();
+        println!(
+            " compute_benefits sys time(s) {:?} cpu time {:?}",
+            sys_now.elapsed().unwrap().as_secs(),
+            cpu_time.as_secs()
+        );
+        //
         benefits
     } // end of compute_benefits
 
@@ -781,9 +787,9 @@ mod tests {
         }
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         // Space definition
-        let space = Space::new(dim, 0., width, mindist);
+        let mut space = Space::new(dim, 0., width, mindist);
 
-        let mut mesh = SpaceMesh::new(&space, refpoints);
+        let mut mesh = SpaceMesh::new(&mut space, refpoints);
         mesh.embed();
         mesh.summary();
         //
@@ -828,7 +834,7 @@ mod tests {
         log_init_test();
         log::info!("in test_exp_random");
         //
-        let nbvec = 10_000_000_usize;
+        let nbvec = 40_000_000_usize;
         let dim = 25;
         let width: f64 = 1000.;
         let mindist = 5.;
@@ -844,9 +850,9 @@ mod tests {
         }
         let refpoints: Vec<&Point<f32>> = points.iter().map(|p| p).collect();
         // Space definition
-        let space = Space::new(dim, 0., width, mindist);
+        let mut space = Space::new(dim, 0., width, mindist);
 
-        let mut mesh = SpaceMesh::new(&space, refpoints);
+        let mut mesh = SpaceMesh::new(&mut space, refpoints);
         mesh.embed();
         mesh.summary();
         // check number of points for cell at origin

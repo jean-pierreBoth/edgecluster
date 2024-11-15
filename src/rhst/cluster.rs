@@ -1,5 +1,11 @@
 //! construct agglomerative cluster from rhst2
 //!
+//!
+
+use cpu_time::ProcessTime;
+use std::time::{Duration, SystemTime};
+
+use std::collections::HashMap;
 
 use dashmap::{iter, mapref::one, rayon::*, DashMap};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -11,6 +17,91 @@ use num_traits::{cast::AsPrimitive, Float};
 
 use super::point::*;
 use super::rhst2::*;
+
+//============================================
+
+// This structure stores, for a  given layer,  for each sub tree rooted at this layer, the layer 0 cell (alias for a point) with max benefit
+pub(crate) struct LayerBestTree {
+    layer: u16,
+    // at each cell identified by index given by Vec<u16> corresponds the cell (point) at layer 0 having the higher benefit
+    best: HashMap<Vec<u16>, BenefitUnit>,
+    // number of sub trees needed to be full
+    nb_subtrees: usize,
+}
+
+impl LayerBestTree {
+    pub fn new_with_size(layer: u16, nbcells: usize) -> Self {
+        // layer 0 has no subtree
+        assert!(layer > 0);
+        let best: HashMap<Vec<u16>, BenefitUnit> = HashMap::with_capacity(nbcells);
+        LayerBestTree {
+            layer,
+            best,
+            nb_subtrees: nbcells,
+        }
+    }
+
+    pub fn get_layer(&self) -> u16 {
+        self.layer
+    }
+
+    // return true if each sub tree is initialized
+    pub(crate) fn is_full(&self) -> bool {
+        self.nb_subtrees == self.best.len()
+    }
+
+    // return OK if insertion succeeded
+    pub(crate) fn insert(&mut self, unit: &BenefitUnit) -> anyhow::Result<()> {
+        panic!("not yet implemented");
+    }
+
+    pub fn get_best(&self, idx: &Vec<u16>) -> &BenefitUnit {
+        let res = self.best.get(idx);
+        if res.is_none() {
+            log::error!(
+                "cannot find best point for root tree at layer : {}, index : {:?}",
+                self.layer,
+                idx
+            );
+            panic!("error in RootBestTree::get_best");
+        };
+        res.unwrap()
+    }
+} // end of LayerBestTree
+
+// gathers subtrees at each layer
+pub(crate) struct BestTree {
+    // subtrees by layer
+    bylayers: Vec<LayerBestTree>,
+    // status of each layer subtrees. If all is full we can stop parsing benefits
+    filled: Vec<bool>,
+}
+
+impl BestTree {
+    pub(crate) fn new(nb_layer: usize) -> Self {
+        let bylayers: Vec<LayerBestTree> = Vec::with_capacity(nb_layer);
+        let filled = vec![false; nb_layer];
+        BestTree { bylayers, filled }
+    }
+
+    // as benefits are sorted in decreasing order, we can scan units and as soon as each cell of each layer
+    // has seen its index appearing we are done, every subsequent item will not be the best
+    pub(crate) fn from_benefits(&mut self, benefits: &Vec<BenefitUnit>) {
+        for unit in benefits {
+            //
+            let (idx, l) = unit.get_id();
+            let layer = &mut self.bylayers[l as usize];
+            //
+        }
+        //
+        panic!("not yet implemented");
+    }
+
+    pub(crate) fn get_best(&self, layer: u16, idx: &Vec<u16>) -> &BenefitUnit {
+        assert!(layer > 0);
+        self.bylayers[(layer - 1) as usize].get_best(idx)
+    }
+}
 
 //==========================
 
@@ -68,15 +159,17 @@ where
         log::debug!("xmin : {:.3e}, xmax : {:.3e}", xmin, xmax);
         // construct spacemesh
         let dim = self.points[0].get_dimension();
-        let space = Space::new(dim, xmin, xmax, mindist);
+        let mut space = Space::new(dim, xmin, xmax, mindist);
         // TODO: do we need to keep points in HCluster (we clone a vec of references)
-        let mut spacemesh = SpaceMesh::new(&self.space, self.points.clone());
+        let mut spacemesh = SpaceMesh::new(&mut space, self.points.clone());
         spacemesh.embed();
         //
         spacemesh.summary();
         let benefits = spacemesh.compute_benefits();
-        //
-        //        let cost_analysis = CostBenefit::<'a, 'b, T>::new(&spacemesh);
+        // now we extract best subtrees from benefits in mesh
+        let mut best_tree = BestTree::new(spacemesh.get_nb_layers());
+        best_tree.from_benefits(&benefits);
+
         //
     }
 } // end impl Hcluster
