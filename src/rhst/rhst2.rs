@@ -373,7 +373,7 @@ pub(crate) struct BenefitUnit {
 }
 
 impl BenefitUnit {
-    fn new(cell_index: Vec<u16>, layer: u16, benefit: u32) -> Self {
+    pub(crate) fn new(cell_index: Vec<u16>, layer: u16, benefit: u32) -> Self {
         BenefitUnit {
             cell_index,
             layer,
@@ -384,6 +384,11 @@ impl BenefitUnit {
     // returns cell index and layer
     pub(crate) fn get_id(&self) -> (&Vec<u16>, u16) {
         (&self.cell_index, self.layer)
+    }
+
+    //
+    pub(crate) fn get_benefit(&self) -> u32 {
+        self.benefit
     }
 } // end impl BenefitUnit
 
@@ -499,6 +504,10 @@ where
     /// returns minimum distance detectable by mesh
     pub fn get_mindist(&self) -> f64 {
         self.space.mindist
+    }
+
+    pub fn get_layer_size(&self, layer: usize) -> usize {
+        self.layers[layer].get_nb_cells()
     }
 
     /// return index in mesh of a cell for a point at layer l layer 0 is at finer scale
@@ -835,7 +844,7 @@ mod tests {
         log::info!("in test_exp_random");
         //
         let nbvec = 40_000_000_usize;
-        let dim = 25;
+        let dim = 15;
         let width: f64 = 1000.;
         let mindist = 5.;
         // sample with coordinates following exponential law

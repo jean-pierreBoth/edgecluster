@@ -3,6 +3,7 @@
 //!
 
 use cpu_time::ProcessTime;
+use std::fmt::Debug;
 use std::time::{Duration, SystemTime};
 
 use std::collections::HashMap;
@@ -23,7 +24,7 @@ use super::rhst2::*;
 // This structure stores, for a  given layer,  for each sub tree rooted at this layer, the layer 0 cell (alias for a point) with max benefit
 pub(crate) struct LayerBestTree {
     layer: u16,
-    // at each cell identified by index given by Vec<u16> corresponds the cell (point) at layer 0 having the higher benefit
+    // at each cell identified by its index at layer l given by Vec<u16> corresponds the cell (point) at layer 0 having the higher benefit
     best: HashMap<Vec<u16>, BenefitUnit>,
     // number of sub trees needed to be full
     nb_subtrees: usize,
@@ -50,10 +51,19 @@ impl LayerBestTree {
         self.nb_subtrees == self.best.len()
     }
 
-    // return OK if insertion succeeded
-    pub(crate) fn insert(&mut self, unit: &BenefitUnit) -> anyhow::Result<()> {
-        panic!("not yet implemented");
-    }
+    // return true if full
+    pub(crate) fn insert(&mut self, l_idx: Vec<u16>, unit: &BenefitUnit) -> bool {
+        if self.best.contains_key(&l_idx) {
+            false
+        } else {
+            self.best.insert(l_idx, unit.clone());
+            if self.best.len() >= self.nb_subtrees {
+                true
+            } else {
+                false
+            }
+        }
+    } // end of insert
 
     pub fn get_best(&self, idx: &Vec<u16>) -> &BenefitUnit {
         let res = self.best.get(idx);
@@ -69,6 +79,8 @@ impl LayerBestTree {
     }
 } // end of LayerBestTree
 
+//==================
+
 // gathers subtrees at each layer
 pub(crate) struct BestTree {
     // subtrees by layer
@@ -78,8 +90,17 @@ pub(crate) struct BestTree {
 }
 
 impl BestTree {
-    pub(crate) fn new(nb_layer: usize) -> Self {
-        let bylayers: Vec<LayerBestTree> = Vec::with_capacity(nb_layer);
+    //
+    pub(crate) fn new<'a, T>(nb_layer: usize, spacemesh: &SpaceMesh<'a, T>) -> Self
+    where
+        T: Float + Debug + Sync,
+    {
+        let mut bylayers: Vec<LayerBestTree> = Vec::with_capacity(nb_layer);
+        for layer in 1..nb_layer {
+            let nbcells = spacemesh.get_layer_size(layer);
+            let layer_tree = LayerBestTree::new_with_size(layer as u16, nbcells);
+            bylayers.push(layer_tree);
+        }
         let filled = vec![false; nb_layer];
         BestTree { bylayers, filled }
     }
@@ -87,15 +108,39 @@ impl BestTree {
     // as benefits are sorted in decreasing order, we can scan units and as soon as each cell of each layer
     // has seen its index appearing we are done, every subsequent item will not be the best
     pub(crate) fn from_benefits(&mut self, benefits: &Vec<BenefitUnit>) {
-        for unit in benefits {
+        //
+        log::info!("in from_benefits");
+        let cpu_start = ProcessTime::now();
+        let sys_now = SystemTime::now();
+        //
+        let mut nb_full = 0;
+        for (i, unit) in benefits.iter().enumerate() {
             //
             let (idx, l) = unit.get_id();
-            let layer = &mut self.bylayers[l as usize];
-            //
+            assert!(l >= 1);
+            let layer = &mut self.bylayers[l as usize - 1];
+            // convert idx from layer 0 to layer l
+            let l_idx: Vec<u16> = idx.iter().map(|x| x << l).collect();
+            let full = layer.insert(l_idx, unit);
+            if full {
+                self.filled[l as usize] = true;
+                nb_full += 1;
+                if nb_full == self.bylayers.len() {
+                    log::info!("from benefits exiting after nb unit scan : {}", i);
+                    break;
+                }
+            }
         }
+        log::info!("exiting from_benefits");
+        let cpu_time: Duration = cpu_start.elapsed();
+        println!(
+            " compute_benefits sys time(s) {:?} cpu time {:?}",
+            sys_now.elapsed().unwrap().as_secs(),
+            cpu_time.as_secs()
+        );
+        assert_eq!(nb_full, self.bylayers.len());
         //
-        panic!("not yet implemented");
-    }
+    } // end of from_benefits
 
     pub(crate) fn get_best(&self, layer: u16, idx: &Vec<u16>) -> &BenefitUnit {
         assert!(layer > 0);
@@ -167,7 +212,7 @@ where
         spacemesh.summary();
         let benefits = spacemesh.compute_benefits();
         // now we extract best subtrees from benefits in mesh
-        let mut best_tree = BestTree::new(spacemesh.get_nb_layers());
+        let mut best_tree = BestTree::new(spacemesh.get_nb_layers(), &spacemesh);
         best_tree.from_benefits(&benefits);
 
         //
