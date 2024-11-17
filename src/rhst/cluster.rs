@@ -51,6 +51,7 @@ impl LayerBestTree {
     }
 
     // return true if full
+    #[allow(clippy::map_entry)]
     pub(crate) fn insert(&mut self, l_idx: Vec<u16>, unit: &BenefitUnit) -> bool {
         if self.best.contains_key(&l_idx) {
             false
@@ -95,7 +96,7 @@ pub(crate) struct BestTree {
 
 impl BestTree {
     //
-    pub(crate) fn new<'a, T>(nb_layer: usize, spacemesh: &SpaceMesh<'a, T>) -> Self
+    pub(crate) fn new<T>(nb_layer: usize, spacemesh: &SpaceMesh<'_, T>) -> Self
     where
         T: Float + std::fmt::Debug + Sync,
     {
@@ -111,7 +112,7 @@ impl BestTree {
 
     // as benefits are sorted in decreasing order, we can scan units and as soon as each cell of each layer
     // has seen its index appearing we are done, every subsequent item will not be the best
-    pub(crate) fn from_benefits(&mut self, benefits: &Vec<BenefitUnit>) {
+    pub(crate) fn get_benefits(&mut self, benefits: &[BenefitUnit]) {
         //
         log::info!("in from_benefits");
         let cpu_start = ProcessTime::now();
@@ -120,10 +121,8 @@ impl BestTree {
         let mut nb_full = 0;
         for (i, unit) in benefits.iter().enumerate() {
             //
-            if i <= 10 {
-                if log::log_enabled!(log::Level::Debug) {
-                    log::debug!(" benefit rank : {}, unit : {:?}", i, unit);
-                }
+            if i <= 10 && log::log_enabled!(log::Level::Debug) {
+                log::debug!(" benefit rank : {}, unit : {:?}", i, unit);
             }
             //
             let (idx, l) = unit.get_id();
@@ -223,7 +222,7 @@ where
         let benefits = spacemesh.compute_benefits();
         // now we extract best subtrees from benefits in mesh
         let mut best_tree = BestTree::new(spacemesh.get_nb_layers(), &spacemesh);
-        best_tree.from_benefits(&benefits);
+        best_tree.get_benefits(&benefits);
         // now we search for indexes in the lower layer the highest layer
         // where it registered as a best benefit
 

@@ -435,7 +435,7 @@ where
             (((1 + points.len().ilog2()) / dim as u32) + 1).min(15) as u16;
         log::info!("recommended nb layer : {}", recommended_nb_layer);
         //
-        let layer_max_u: usize = ((space.get_dim() as f64).sqrt() as f64 * space.get_width()
+        let layer_max_u: usize = ((space.get_dim() as f64).sqrt() * space.get_width()
             / space.mindist)
             .log2()
             .trunc() as usize;
@@ -447,8 +447,8 @@ where
         let layer_max_scale: u16 = layer_max_u.try_into().unwrap();
         let layer_max = (layer_max_scale + recommended_nb_layer) / 2;
         let nb_layer = layer_max;
-        space.mindist = (space.get_dim() as f64).sqrt() as f64 * space.get_width()
-            / 2i32.pow(nb_layer as u32) as f64;
+        space.mindist =
+            (space.get_dim() as f64).sqrt() * space.get_width() / 2i32.pow(nb_layer as u32) as f64;
         log::info!(
             "setting nb layer to {}, mindist : {:.3e}",
             nb_layer,

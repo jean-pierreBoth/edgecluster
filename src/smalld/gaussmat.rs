@@ -34,17 +34,20 @@ where
         }
     }
 
-    ///
+    /// reduce dimension of data, returning reduced data
     pub fn reduce(&self, data: &[&Vec<T>]) -> Vec<Vec<T>> {
         //
         let mut reduced_data = Vec::<Vec<T>>::with_capacity(data.len());
         //
         let reduce_item = |item: &Vec<T>| -> Vec<T> {
+            let f: T = T::from(self.to_dim).unwrap().sqrt();
             let small_item = (0..self.to_dim)
                 .map(|i| {
-                    self.gauss
+                    (self
+                        .gauss
                         .row(i)
-                        .dot(&ArrayView1::from_shape((item.len()), &item).unwrap())
+                        .dot(&ArrayView1::from_shape((item.len()), item).unwrap())
+                        / f)
                 })
                 .collect();
             small_item
@@ -52,9 +55,58 @@ where
         //
         let reduced_data = data
             .par_iter()
-            .map(|item| reduce_item(*item))
+            .map(|item| reduce_item(item))
             .collect::<Vec<Vec<T>>>();
-        //
+
         reduced_data
     }
 } // end of impl
+
+mod tests {
+
+    use super::*;
+
+    use rand::distributions::Uniform;
+    use rand::prelude::*;
+    use rand_xoshiro::Xoshiro256PlusPlus;
+
+    use rand_distr::{Distribution, Exp};
+
+    fn log_init_test() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
+    #[test]
+    fn check_norm() {
+        log_init_test();
+        log::info!("in test_uniform_random");
+        //
+        let nbvec = 10_000usize;
+        let dim = 200;
+        let width: f64 = 1000.;
+        let unif_01 = Uniform::<f64>::new(0., 1.);
+        let unif_range = Uniform::<f64>::new(0., width);
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
+        let nb_vec = 1000;
+
+        let data_large: Vec<Vec<f64>> = (0..nb_vec)
+            .map(|_| {
+                let m = unif_range.sample(&mut rng);
+                let p: Vec<f64> = (0..dim).map(|_| m * unif_01.sample(&mut rng)).collect();
+                return p;
+            })
+            .collect();
+        // reduce dim
+        let data_ref: Vec<&Vec<f64>> = data_large.iter().map(|v| v).collect();
+        let mat = GaussianMat::<f64>::new(dim, 15);
+        let data_small = mat.reduce(&data_ref);
+        //
+        let norm = |v: &[f64]| -> f64 { v.iter().fold(0., |acc, x| acc + (*x) * (*x)).sqrt() };
+        //
+        let mut ratio = 0.0;
+        for i in 0..nb_vec {
+            ratio += (norm(&data_large[i]) - norm(&data_small[i])) / norm(&data_large[i]);
+        }
+        log::info!("norm ratio : {:.e}", ratio / nb_vec as f64);
+    } // end check_norm
+} // end of mod tests
