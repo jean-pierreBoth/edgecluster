@@ -15,3 +15,4 @@ fn init_log() -> u64 {
 }
 
 pub mod rhst;
+pub mod smalld;

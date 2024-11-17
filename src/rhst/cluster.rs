@@ -224,6 +224,8 @@ where
         // now we extract best subtrees from benefits in mesh
         let mut best_tree = BestTree::new(spacemesh.get_nb_layers(), &spacemesh);
         best_tree.from_benefits(&benefits);
+        // now we search for indexes in the lower layer the highest layer
+        // where it registered as a best benefit
 
         //
     }

@@ -20,8 +20,6 @@ num_cpus = { version = "1.16" }
 
 cpu-time = { version = "1.0" }
 
-ndarray = { version = ">=0.15, <=0.16", features = ["rayon", "serde"] }
-
 
 # rand utilis
 rand = { version = "0.8" }
@@ -29,9 +27,12 @@ rand_distr = { version = "0.4" }
 rand_xoshiro = { version = "0.6" }
 quantiles = { version = "0.7" }
 
+
 num-traits = { version = "0.2" }
 lazy_static = { version = "1.5" }
 
+ndarray = { version = "0.16", features = ["rayon", "serde"] }
+ndarray-rand = { version = "0.15" }
 
 # for io
 csv = { version = "1.3" }
