@@ -65,7 +65,11 @@ impl Space {
         let layer_max_u: usize = ((dim as f64).sqrt() * width / mindist).log2().trunc() as usize;
         let nb_layer = layer_max_u + 1;
         let mut accepted_mindist: f64 = mindist;
-        log::info!("nb layer : {}", nb_layer);
+        log::info!(
+            "Space::new nb layer : {}, mindist : {:.2e}",
+            nb_layer,
+            mindist
+        );
         if (nb_layer > 16) {
             log::error!("too many layers, mindist is too small");
             accepted_mindist = (dim as f64).sqrt() * width / 2_i32.pow(16) as f64;
@@ -442,29 +446,38 @@ where
         let dim: usize = points[0].get_dimension();
         let recommended_nb_layer: u16 =
             (((1 + points.len().ilog2()) / dim as u32) + 1).min(15) as u16;
-        log::info!("recommended nb layer : {}", recommended_nb_layer);
+        log::info!(
+            "depending on number of points, recommended nb layer : {}",
+            recommended_nb_layer
+        );
         //
         let layer_max_u: usize = ((space.get_dim() as f64).sqrt() * space.get_width()
             / space.mindist)
             .log2()
             .trunc() as usize;
         let nb_layer = layer_max_u + 1;
-        log::info!("nb layer  for mindist asked : {}", nb_layer);
+        log::info!(
+            "depending on mindist  : {:.2e} nb layer recommended : {}",
+            space.mindist,
+            nb_layer
+        );
         if (nb_layer >= 8) {
             log::warn!("perhaps increase mindist to reduce nb_layer");
         }
         let layer_max_scale: u16 = layer_max_u.try_into().unwrap();
         let layer_max = (layer_max_scale + recommended_nb_layer) / 2;
-        let nb_layer = layer_max;
+        let nb_layer = layer_max + 1;
         space.mindist =
             (space.get_dim() as f64).sqrt() * space.get_width() / 2i32.pow(nb_layer as u32) as f64;
+        space.nb_layer = nb_layer as usize;
+        //
         log::info!(
             "setting nb layer to {}, mindist : {:.3e}",
             nb_layer,
             space.mindist
         );
         //
-        let mut layers: Vec<Layer<T>> = Vec::with_capacity(layer_max as usize + 1);
+        let mut layers: Vec<Layer<T>> = Vec::with_capacity(nb_layer as usize);
         //
         SpaceMesh {
             space,
@@ -739,6 +752,30 @@ where
         size
     }
 } // end of impl SpaceMesh
+
+//==================
+
+pub(crate) fn dump_benefits(benefits: &Vec<BenefitUnit>) {
+    for unit in benefits {
+        log::info!(" {:?}", unit);
+    }
+}
+
+// we check we have a partition
+pub(crate) fn check_partition<'a, T>(spacemesh: &SpaceMesh<'a, T>, benefits: &Vec<BenefitUnit>)
+where
+    T: Float + Debug + Sync,
+{
+    let mut nb_points_in: usize = 0;
+    for unit in benefits {
+        let (low_idx, l) = unit.get_id();
+        let up_idx: Vec<u16> = low_idx.iter().map(|x| x >> l).collect();
+        let cell = spacemesh.get_layer(l).get_cell(&up_idx).unwrap();
+        nb_points_in += cell.get_nb_points();
+    }
+    log::info!("nb points referenced in benefits : {}", nb_points_in);
+    log::info!("nb points in space : {}", spacemesh.get_nb_points());
+}
 
 //===========================
 

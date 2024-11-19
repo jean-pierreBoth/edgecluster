@@ -188,7 +188,7 @@ where
         // construct spacemesh
         let dim = points[0].get_dimension();
         log::info!(
-            "dimension : {}, xmin : {:.3e}, xmax : {:.3e}",
+            "space dimension : {}, xmin : {:.3e}, xmax : {:.3e}",
             dim,
             xmin,
             xmax
@@ -288,6 +288,9 @@ where
                 .unwrap()
         });
         //
+        dump_benefits(&filtered_benefits);
+        check_partition(&spacemesh, &filtered_benefits);
+        //
     }
 } // end impl Hcluster
 
@@ -325,11 +328,37 @@ mod tests {
             points.push(Point::<f64>::new(i, p, (i % 5).try_into().unwrap()));
         }
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
-        // Space definition
-        let space = Space::new(dim, 0., width, mindist);
         //
         let hcluster = Hcluster::new(refpoints);
         hcluster.cluster(mindist);
         //
-    } //end of test_uniform_random
+    } //end of test_cluster_random
+
+    #[test]
+    fn test_cluster_exp() {
+        log_init_test();
+        log::info!("in test_uniform_random");
+        //
+        let nbvec = 1_000_000usize;
+        let dim = 5;
+        let width: f64 = 100.;
+        let mindist = 5.;
+
+        // sample with coordinates following exponential law
+        let law = Exp::<f32>::new(10. / width as f32).unwrap();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
+        let mut points: Vec<Point<f32>> = Vec::with_capacity(nbvec);
+        for i in 0..nbvec {
+            let p: Vec<f32> = (0..dim)
+                .map(|_| law.sample(&mut rng).min(width as f32))
+                .collect();
+            points.push(Point::<f32>::new(i, p, (i % 5).try_into().unwrap()));
+        }
+        let refpoints: Vec<&Point<f32>> = points.iter().map(|p| p).collect();
+        // Space definition
+        //
+        let hcluster = Hcluster::new(refpoints);
+        hcluster.cluster(mindist);
+        //
+    } //end of test_cluster_exp
 } // end of tests
