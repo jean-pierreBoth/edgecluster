@@ -45,6 +45,9 @@ impl LayerBestTree {
         self.layer
     }
 
+    pub fn get_map(&self) -> &HashMap<Vec<u16>, BenefitUnit> {
+        &self.best
+    }
     // return true if each sub tree is initialized
     pub(crate) fn is_full(&self) -> bool {
         self.nb_subtrees == self.best.len()
@@ -225,7 +228,65 @@ where
         best_tree.get_benefits(&benefits);
         // now we search for indexes in the lower layer the highest layer
         // where it registered as a best benefit
-
+        let lower_tree = &best_tree.bylayers[0];
+        let lower_map: &HashMap<Vec<u16>, BenefitUnit> = lower_tree.get_map();
+        log::info!("lower_map size : {}", lower_map.len());
+        let mut filtered_benefits: Vec<BenefitUnit> = Vec::with_capacity(lower_map.len());
+        // we loop on space mesh layer 0 cells
+        let mut nb_cell_scanned = 0;
+        log::info!(
+            " loop on cells , nb cells to scan : {}",
+            spacemesh.get_layer(0).get_nb_cells()
+        );
+        for entry in spacemesh.get_layer(0).get_iter() {
+            nb_cell_scanned += 1;
+            let cell_idx = entry.key();
+            if let Some(mut lower_benefit) = lower_map.get(cell_idx) {
+                let mut l = 1;
+                let upper = loop {
+                    let cell_idx = entry.key();
+                    let upper_idx: Vec<u16> = cell_idx.iter().map(|x| x >> l).collect();
+                    // lowest layer in trees ...
+                    let upper_map: &HashMap<Vec<u16>, BenefitUnit> =
+                        best_tree.bylayers[l - 1].get_map();
+                    let upper_benefit = upper_map.get(&upper_idx).unwrap();
+                    // what is cell 0 referred to in max_benefit, if equal to cell_idx level of cell_idx is at least 1, we search upward
+                    // else cell_idx is not referenced anywhere
+                    if !upper_benefit.get_cell_idx().iter().eq(cell_idx.iter())
+                        || l == best_tree.bylayers.len()
+                    {
+                        break l - 1;
+                    } else {
+                        // we got upper most reference to cell_idx
+                        // cell_idx is reference we go once in loop
+                        lower_benefit = upper_benefit;
+                        l = l + 1;
+                    }
+                }; // end of loop on layers
+                if upper > 0 {
+                    // we reference cell_idx and its upper most appearance
+                    log::debug!(
+                        "upper level found : {}, benefit {:.2e}, cell idx : {:?}",
+                        upper,
+                        lower_benefit.get_benefit(),
+                        lower_benefit.get_cell_idx()
+                    );
+                    filtered_benefits.push(lower_benefit.clone());
+                }
+            }
+        } // end loop on cells
+          // we sort filtered_benefits in decreasing ordrer
+        log::info!("nb cell scanned : {}", nb_cell_scanned);
+        log::info!(
+            "sorting filtered benefits, len : {}",
+            filtered_benefits.len()
+        );
+        filtered_benefits.par_sort_unstable_by(|unita, unitb| {
+            unitb
+                .get_benefit()
+                .partial_cmp(&unita.get_benefit())
+                .unwrap()
+        });
         //
     }
 } // end impl Hcluster
@@ -252,9 +313,9 @@ mod tests {
         log_init_test();
         log::info!("in test_uniform_random");
         //
-        let nbvec = 10_000_000usize;
+        let nbvec = 1_000_000usize;
         let dim = 5;
-        let width: f64 = 1000.;
+        let width: f64 = 100.;
         let mindist = 5.;
         let unif_01 = Uniform::<f64>::new(0., width);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);

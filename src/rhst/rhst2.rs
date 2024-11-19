@@ -329,6 +329,10 @@ where
     }
 
     // get an iterator over cells
+    pub fn get_iter(&self) -> iter::Iter<Vec<u16>, Cell<'a, T>> {
+        self.hcells.iter()
+    }
+    // get an iterator over cells
     fn get_iter_mut(&self) -> iter::IterMut<Vec<u16>, Cell<'a, T>> {
         self.hcells.iter_mut()
     }
@@ -386,6 +390,11 @@ impl BenefitUnit {
     // returns cell index and layer
     pub(crate) fn get_id(&self) -> (&Vec<u16>, u16) {
         (&self.cell_index, self.layer)
+    }
+
+    // returns cell index
+    pub(crate) fn get_cell_idx(&self) -> &Vec<u16> {
+        &self.cell_index
     }
 
     //
