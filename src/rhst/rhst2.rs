@@ -15,7 +15,7 @@ use num_traits::float::Float;
 
 use std::fmt::Debug;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use dashmap::{iter, mapref::one, rayon::*, DashMap};
 use ego_tree::{tree, NodeMut, Tree};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -109,6 +109,20 @@ impl Space {
     /// fn get_xmin
     pub fn get_xmin(&self) -> f64 {
         self.xmin
+    }
+
+    pub fn dump(&self) {
+        log::info!("dim : {}", self.dim);
+        log::info!(
+            "xmin : {:.2e}, xmax : {:.2e}",
+            self.xmin,
+            self.xmin + self.width
+        );
+        log::info!(
+            "nb layer : {}, mindist : {:.2e}",
+            self.nb_layer,
+            self.mindist
+        );
     }
 }
 
@@ -221,7 +235,7 @@ where
             .unwrap();
         let cell_width = self.space.width / (2u32.pow(exponent) as f64);
         let position: Vec<f64> = (0..self.space.dim)
-            .map(|i| 0.5 * cell_width + self.index[i] as f64 * self.space.width)
+            .map(|i| 0.5 * cell_width + self.index[i] as f64 * cell_width)
             .collect();
         //
         position
@@ -411,11 +425,15 @@ impl BenefitUnit {
 
 #[cfg_attr(doc, katexit::katexit)]
 /// structure describing space in which data point are supposed to live.
-/// Data are supposed to live in an enclosing box $$[xmin, xmax]^dim$$
-/// Space is seen at different resolution, each resolution is finer with each cell size divided by 2.
+/// Data are supposed to live in an enclosing box $$[xmin, xmax]^dim$$.  
+/// Space is seen at different resolution, each resolution is finer with each cell size divided by 2, therefore
+/// the number of cells grow by a factor $2^d$ at each layer.
+///
+/// Cells are characterized by their index in the mesh at each layer. Knowing the index of a cell at layer 0
+/// the cell at layer l enclosing it is obtained by dividing the index at layer 0 by $2^l$
 /// The coarser mesh will be upper layer.
 ///
-/// Cells are nodes in a tree, each cell , if some data is present in a cell, it is split and propagated at lower layer
+/// Cells are nodes in a tree, each cell , if some data is present in it, is split and propagated at lower layer
 /// and points are dispatched in new (smaller) cells.
 pub struct SpaceMesh<'a, T: Float> {
     space: &'a Space,
@@ -530,6 +548,7 @@ where
         self.space.mindist
     }
 
+    /// return number of cells in layer
     pub fn get_layer_size(&self, layer: usize) -> usize {
         self.layers[layer].get_nb_cells()
     }
@@ -554,8 +573,29 @@ where
         index
     } // end get_cell_index
 
+    /// given index of cell at 0 , compute index at layer l
+    pub fn to_upper_index(&self, index0: &[u16], l: u16) -> Vec<u16> {
+        index0.iter().map(|x| x >> l).collect()
+    }
+
+    /// get cell center knowing its index and layer.
+    /// Returns an error if no cell corresponds to this index.
+    pub fn get_cell_center(&self, idx: &[u16], l: u16) -> anyhow::Result<Vec<f64>> {
+        assert!((l as usize) < self.get_nb_layers());
+        let index_l = self.to_upper_index(idx, l);
+        let res = self.layers[l as usize].get_cell(&index_l);
+        if res.is_none() {
+            return Err(anyhow!("no cell at index"));
+        }
+        Ok(res.unwrap().get_cell_center())
+    }
+
     // return reference to dashmap entry
-    fn get_cell_with_position(&self, p: &[T], l: usize) -> Option<one::Ref<Vec<u16>, Cell<'a, T>>> {
+    pub(crate) fn get_cell_with_position(
+        &self,
+        p: &[T],
+        l: usize,
+    ) -> Option<one::Ref<Vec<u16>, Cell<'a, T>>> {
         let idx = self.get_cell_index(p, l);
         self.layers[l].get_cell(&idx)
     }
@@ -640,6 +680,16 @@ where
                     nbpt_by_cell
                 );
             }
+        }
+        // debug info : dump coordianates of layer 0 origin cell
+        for l in 0..self.get_nb_layers() {
+            let layer = self.get_layer(l as u16);
+            let cell0 = layer.get_hcells().iter().nth(0).unwrap();
+            let cell0_idx = cell0.get_cell_index();
+            let cell0_center = cell0.get_cell_center();
+            log::info!("layer : {}", l);
+            log::info!("index of first (in iterator) cell : {:?}", cell0_idx);
+            log::info!("coordinates of first cell : {:?}", cell0_center);
         }
         //
         self.compute_subtree_size();
@@ -771,6 +821,7 @@ where
         let (low_idx, l) = unit.get_id();
         let up_idx: Vec<u16> = low_idx.iter().map(|x| x >> l).collect();
         let cell = spacemesh.get_layer(l).get_cell(&up_idx).unwrap();
+        assert!(cell.get_nb_points() > 0);
         nb_points_in += cell.get_nb_points();
     }
     log::info!("nb points referenced in benefits : {}", nb_points_in);
@@ -845,8 +896,9 @@ mod tests {
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         // Space definition
         let mut space = Space::new(dim, 0., width, mindist);
-
         let mut mesh = SpaceMesh::new(&mut space, refpoints);
+        // check cell basics, center, index conversion
+        //
         mesh.embed();
         mesh.summary();
         //

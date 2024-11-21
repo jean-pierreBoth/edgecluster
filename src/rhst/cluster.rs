@@ -85,6 +85,10 @@ impl LayerBestTree {
         };
         res.unwrap()
     }
+
+    pub fn get_nb_subtree(&self) -> usize {
+        self.nb_subtrees
+    }
 } // end of LayerBestTree
 
 //==================
@@ -158,6 +162,36 @@ impl BestTree {
         assert!(layer > 0);
         self.bylayers[(layer - 1) as usize].get_best(idx)
     }
+
+    //
+    pub(crate) fn get_filtered_benefits(&self) -> Vec<BenefitUnit> {
+        let nb_sub_trees: usize = self
+            .bylayers
+            .iter()
+            .fold(0, |acc, l| acc + l.get_nb_subtree());
+        //
+        let mut filtered_benefits: Vec<BenefitUnit> = Vec::with_capacity(nb_sub_trees);
+        // we collect units and sort them. reverse order as higher benefits should be upper...
+        for l in (0..self.bylayers.len()).rev() {
+            let layer = &self.bylayers[l];
+            for (k, v) in layer.get_map() {
+                filtered_benefits.push(v.clone());
+            }
+        }
+        log::info!(
+            "BestTree::get_filtered_benefits, got nb unit : {}",
+            filtered_benefits.len()
+        );
+        // sorting
+        filtered_benefits.par_sort_unstable_by(|unita, unitb| {
+            unitb
+                .get_benefit()
+                .partial_cmp(&unita.get_benefit())
+                .unwrap()
+        });
+        //
+        filtered_benefits
+    }
 }
 
 //==========================
@@ -226,6 +260,13 @@ where
         // now we extract best subtrees from benefits in mesh
         let mut best_tree = BestTree::new(spacemesh.get_nb_layers(), &spacemesh);
         best_tree.get_benefits(&benefits);
+
+        let filtered_benefits = best_tree.get_filtered_benefits();
+        log::info!("dump of BestTree::get_filtered_benefits");
+        dump_benefits(&filtered_benefits);
+        check_partition(&spacemesh, &filtered_benefits);
+
+        /*
         // now we search for indexes in the lower layer the highest layer
         // where it registered as a best benefit
         let lower_tree = &best_tree.bylayers[0];
@@ -244,17 +285,18 @@ where
             if let Some(mut lower_benefit) = lower_map.get(cell_idx) {
                 let mut l = 1;
                 let upper = loop {
+                    if l > best_tree.bylayers.len() {
+                        break l - 1;
+                    }
                     let cell_idx = entry.key();
                     let upper_idx: Vec<u16> = cell_idx.iter().map(|x| x >> l).collect();
-                    // lowest layer in trees ...
+                    // lowest layer in trees has l - 1 index in layers (as 0-th layer in mesh is skipped)
                     let upper_map: &HashMap<Vec<u16>, BenefitUnit> =
                         best_tree.bylayers[l - 1].get_map();
                     let upper_benefit = upper_map.get(&upper_idx).unwrap();
                     // what is cell 0 referred to in max_benefit, if equal to cell_idx level of cell_idx is at least 1, we search upward
                     // else cell_idx is not referenced anywhere
-                    if !upper_benefit.get_cell_idx().iter().eq(cell_idx.iter())
-                        || l == best_tree.bylayers.len()
-                    {
+                    if !upper_benefit.get_cell_idx().iter().eq(cell_idx.iter()) {
                         break l - 1;
                     } else {
                         // we got upper most reference to cell_idx
@@ -263,9 +305,9 @@ where
                         l = l + 1;
                     }
                 }; // end of loop on layers
+                   // we reference cell_idx and its upper most appearance
                 if upper > 0 {
-                    // we reference cell_idx and its upper most appearance
-                    log::debug!(
+                    log::trace!(
                         "upper level found : {}, benefit {:.2e}, cell idx : {:?}",
                         upper,
                         lower_benefit.get_benefit(),
@@ -290,6 +332,7 @@ where
         //
         dump_benefits(&filtered_benefits);
         check_partition(&spacemesh, &filtered_benefits);
+        */
         //
     }
 } // end impl Hcluster
