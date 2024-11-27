@@ -388,7 +388,7 @@ mod tests {
         let mindist = 5.;
 
         // sample with coordinates following exponential law
-        let law = Exp::<f32>::new(10. / width as f32).unwrap();
+        let law = Exp::<f32>::new(50. / width as f32).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         let mut points: Vec<Point<f32>> = Vec::with_capacity(nbvec);
         for i in 0..nbvec {

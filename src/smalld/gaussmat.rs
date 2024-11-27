@@ -10,6 +10,7 @@ use ndarray_rand::RandomExt;
 
 use rayon::prelude::*;
 
+use super::reducer::Reducer;
 #[cfg_attr(doc, katexit::katexit)]
 /// Dimension reduction using multiplication  by  a full  $N(0,1)$ matrix
 pub struct GaussianMat<T: Float> {
@@ -33,9 +34,14 @@ where
             gauss,
         }
     }
+} // end of impl
 
+impl<T> Reducer<T> for GaussianMat<T>
+where
+    T: 'static + Send + Sync + Float,
+{
     /// reduce dimension of data, returning reduced data
-    pub fn reduce(&self, data: &[&Vec<T>]) -> Vec<Vec<T>> {
+    fn reduce(&self, data: &[&Vec<T>]) -> Vec<Vec<T>> {
         //
         let mut reduced_data = Vec::<Vec<T>>::with_capacity(data.len());
         //
@@ -60,7 +66,7 @@ where
 
         reduced_data
     }
-} // end of impl
+} // end of impl Reduce
 
 mod tests {
 

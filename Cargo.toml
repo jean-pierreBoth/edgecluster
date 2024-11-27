@@ -33,6 +33,7 @@ lazy_static = { version = "1.5" }
 
 ndarray = { version = "0.16", features = ["rayon", "serde"] }
 ndarray-rand = { version = "0.15" }
+lax = { version = "0.16" }
 
 # for io
 csv = { version = "1.3" }
