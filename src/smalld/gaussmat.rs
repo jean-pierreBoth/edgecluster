@@ -66,6 +66,10 @@ where
 
         reduced_data
     }
+
+    fn reduce_a(&self, data: &[&Array1<T>]) -> Vec<Array1<T>> {
+        panic!("not yet implemented");
+    }
 } // end of impl Reduce
 
 mod tests {

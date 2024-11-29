@@ -113,6 +113,48 @@ where
     gauss
 }
 
+//================
+
+impl<T> Reducer<T> for Romg<T>
+where
+    T: 'static + Float + Send + Sync,
+{
+    //
+    fn reduce(&self, data: &[&Vec<T>]) -> Vec<Vec<T>> {
+        //
+        let reduce_item = |v: &Vec<T>| -> Vec<T> {
+            let v = self
+                .mat_reducer
+                .dot(&ArrayView1::from_shape((v.len()), v).unwrap());
+            v.to_vec()
+        };
+
+        let reduced = data
+            .par_iter()
+            .map(|item| reduce_item(item))
+            .collect::<Vec<Vec<T>>>();
+        //
+        reduced
+    }
+
+    fn reduce_a(&self, data: &[&Array1<T>]) -> Vec<Array1<T>> {
+        //
+        let reduce_item = |v: &Array1<T>| -> Array1<T> {
+            let v = self.mat_reducer.dot(v);
+            v
+        };
+
+        let reduced = data
+            .par_iter()
+            .map(|item| reduce_item(item))
+            .collect::<Vec<Array1<T>>>();
+        //
+        reduced
+    }
+}
+
+//====================
+
 fn check_orthogonality<T>(mat: &Array2<T>)
 where
     T: 'static + Float + NumCast + std::fmt::Debug + std::fmt::LowerExp,
@@ -176,6 +218,10 @@ mod tests {
     #[test]
     fn check_reducer() {
         //
+        log_init_test();
+        let n = 200;
+        let mut gauss: Array1<f64> = Array1::<f64>::random((n), StandardNormal);
+        let q = generate_romg::<f64>(5);
 
         panic!("not yet implemented");
     }
