@@ -48,6 +48,15 @@ katexit = { version = "0.1" }
 log = { version = "0.4" }
 env_logger = { version = "0.11" }
 
+[features]
+
+default = []
+# blas choice
+intel-mkl-static = ["ndarray/blas", "lax/intel-mkl-static"]
+openblas-static = ["ndarray/blas", "lax/openblas-static"]
+openblas-system = ["ndarray/blas", "lax/openblas-system"]
+
+
 [dev-dependencies]
 
 rand_distr = { version = "0.4" }
