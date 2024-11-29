@@ -34,17 +34,36 @@ pub struct Romg<T: Float> {
     //
     from_dim: usize,
     //
-    orthogonal: Array2<T>,
+    mat_reducer: Array2<T>,
 }
 
 impl<T> Romg<T>
 where
-    T: 'static + Float + Send + Sync,
+    T: 'static + Float + NumCast + Lapack + ndarray::ScalarOperand + Send + Sync,
+    StandardNormal: Distribution<T>,
 {
     pub fn new(from_dim: usize, to_dim: usize) -> Self {
         assert!(to_dim < from_dim);
         // generate a (from_dim, from_dim) random orthogonal matrix
-        panic!("not yet implemented");
+        let v = generate_romg::<T>(from_dim);
+        // generate a (to_dim, to_dim) random orthogonal matrix
+        let u = generate_romg::<T>(to_dim);
+        // estimate lambda (take  mean or median for Beta(to/2, (from - to)/2 )) with to to >=2 from > to
+        let lambda: T = T::from((to_dim as f64 / from_dim as f64).sqrt()).unwrap();
+        //
+        let mut proj = Array2::<T>::zeros((to_dim, from_dim));
+        for i in 0..to_dim {
+            proj[[i, i]] = T::one();
+        }
+        //
+        let tmp = proj.dot(&v.t());
+        let mat_reducer = u.dot(&tmp) / lambda;
+        //
+        Romg {
+            to_dim,
+            from_dim,
+            mat_reducer,
+        }
     } // end of new
 } // end of impl Romg
 
@@ -67,7 +86,6 @@ where
         log::error!("generate_romg : a lapack error occurred in F::householder");
         panic!();
     }
-
     //
     let lower_try = Array2::from_shape_vec((gauss.nrows(), gauss.nrows()), l_res.unwrap());
     if lower_try.is_err() {
@@ -101,7 +119,7 @@ where
 {
     assert_eq!(mat.ncols(), mat.nrows());
     //
-    let epsil: T = T::from(1.0e-5 as f64).unwrap();
+    let epsil: T = T::from(1.0e-5_f64).unwrap();
     let mut id = mat.t().into_owned();
     id = id.dot(mat);
     //
@@ -113,10 +131,8 @@ where
                 if (id[[i, j]] - T::one()).abs() > epsil {
                     log::error!(" i : {} , j : {} , val : {:?}", i, j, id[[i, j]]);
                 }
-            } else {
-                if (id[[i, j]]).abs() > epsil {
-                    log::error!(" i : {} , j : {} , val : {:?}", i, j, id[[i, j]]);
-                }
+            } else if (id[[i, j]]).abs() > epsil {
+                log::error!(" i : {} , j : {} , val : {:?}", i, j, id[[i, j]]);
             }
         }
     }
@@ -138,6 +154,11 @@ mod tests {
         let _ = env_logger::builder().is_test(true).try_init();
     }
 
+    // compare norm ration
+    fn check_isometry<T>(reduced: &Array1<T>, origin: &Array1<T>) -> f64 {
+        panic!("not yet implemented");
+    }
+
     #[test]
     fn chech_generate_romg() {
         log_init_test();
@@ -151,4 +172,11 @@ mod tests {
         let q = generate_romg::<f64>(4);
         check_orthogonality(&q);
     } // end of chech_generate_romg
+
+    #[test]
+    fn check_reducer() {
+        //
+
+        panic!("not yet implemented");
+    }
 }

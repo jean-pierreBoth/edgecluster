@@ -812,7 +812,7 @@ pub(crate) fn dump_benefits(benefits: &Vec<BenefitUnit>) {
 }
 
 // we check we have a partition
-pub(crate) fn check_partition<'a, T>(spacemesh: &SpaceMesh<'a, T>, benefits: &Vec<BenefitUnit>)
+pub(crate) fn check_partition<T>(spacemesh: &SpaceMesh<T>, benefits: &Vec<BenefitUnit>)
 where
     T: Float + Debug + Sync,
 {
