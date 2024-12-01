@@ -17,6 +17,7 @@ use num_traits::{cast::AsPrimitive, Float};
 
 use super::point::*;
 use super::rhst2::*;
+use crate::smalld::*;
 
 //============================================
 
@@ -208,7 +209,10 @@ impl<'a, T> Hcluster<'a, T>
 where
     T: Float + std::fmt::Debug + Sync + Send,
 {
-    pub fn new(points: Vec<&'a Point<T>>) -> Self {
+    /// This algorithm requires the data to have a small dimension (<= ~10).  
+    /// It is possible to specify an algorithm to reduce data dimension and a target dimension (See [smalld](crate::smalld)).  
+    /// If not, the algorithm will try to choose one.
+    pub fn new(points: Vec<&'a Point<T>>, reducer: Option<&dyn reducer::Reducer<T>>) -> Self {
         // construct space
         let (xmin, xmax) = points
             .iter()
@@ -265,74 +269,6 @@ where
         log::info!("dump of BestTree::get_filtered_benefits");
         dump_benefits(&filtered_benefits);
         check_partition(&spacemesh, &filtered_benefits);
-
-        /*
-        // now we search for indexes in the lower layer the highest layer
-        // where it registered as a best benefit
-        let lower_tree = &best_tree.bylayers[0];
-        let lower_map: &HashMap<Vec<u16>, BenefitUnit> = lower_tree.get_map();
-        log::info!("lower_map size : {}", lower_map.len());
-        let mut filtered_benefits: Vec<BenefitUnit> = Vec::with_capacity(lower_map.len());
-        // we loop on space mesh layer 0 cells
-        let mut nb_cell_scanned = 0;
-        log::info!(
-            " loop on cells , nb cells to scan : {}",
-            spacemesh.get_layer(0).get_nb_cells()
-        );
-        for entry in spacemesh.get_layer(0).get_iter() {
-            nb_cell_scanned += 1;
-            let cell_idx = entry.key();
-            if let Some(mut lower_benefit) = lower_map.get(cell_idx) {
-                let mut l = 1;
-                let upper = loop {
-                    if l > best_tree.bylayers.len() {
-                        break l - 1;
-                    }
-                    let cell_idx = entry.key();
-                    let upper_idx: Vec<u16> = cell_idx.iter().map(|x| x >> l).collect();
-                    // lowest layer in trees has l - 1 index in layers (as 0-th layer in mesh is skipped)
-                    let upper_map: &HashMap<Vec<u16>, BenefitUnit> =
-                        best_tree.bylayers[l - 1].get_map();
-                    let upper_benefit = upper_map.get(&upper_idx).unwrap();
-                    // what is cell 0 referred to in max_benefit, if equal to cell_idx level of cell_idx is at least 1, we search upward
-                    // else cell_idx is not referenced anywhere
-                    if !upper_benefit.get_cell_idx().iter().eq(cell_idx.iter()) {
-                        break l - 1;
-                    } else {
-                        // we got upper most reference to cell_idx
-                        // cell_idx is reference we go once in loop
-                        lower_benefit = upper_benefit;
-                        l = l + 1;
-                    }
-                }; // end of loop on layers
-                   // we reference cell_idx and its upper most appearance
-                if upper > 0 {
-                    log::trace!(
-                        "upper level found : {}, benefit {:.2e}, cell idx : {:?}",
-                        upper,
-                        lower_benefit.get_benefit(),
-                        lower_benefit.get_cell_idx()
-                    );
-                    filtered_benefits.push(lower_benefit.clone());
-                }
-            }
-        } // end loop on cells
-          // we sort filtered_benefits in decreasing ordrer
-        log::info!("nb cell scanned : {}", nb_cell_scanned);
-        log::info!(
-            "sorting filtered benefits, len : {}",
-            filtered_benefits.len()
-        );
-        filtered_benefits.par_sort_unstable_by(|unita, unitb| {
-            unitb
-                .get_benefit()
-                .partial_cmp(&unita.get_benefit())
-                .unwrap()
-        });
-        //
-        dump_benefits(&filtered_benefits);
-        check_partition(&spacemesh, &filtered_benefits);
-        */
         //
     }
 } // end impl Hcluster
@@ -372,7 +308,7 @@ mod tests {
         }
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         //
-        let hcluster = Hcluster::new(refpoints);
+        let hcluster = Hcluster::new(refpoints, None);
         hcluster.cluster(mindist);
         //
     } //end of test_cluster_random
@@ -400,7 +336,7 @@ mod tests {
         let refpoints: Vec<&Point<f32>> = points.iter().map(|p| p).collect();
         // Space definition
         //
-        let hcluster = Hcluster::new(refpoints);
+        let hcluster = Hcluster::new(refpoints, None);
         hcluster.cluster(mindist);
         //
     } //end of test_cluster_exp

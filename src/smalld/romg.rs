@@ -5,8 +5,6 @@
 //! - How to generate random matrices from the classic compact groups Mezzadri 2007
 //!        See [mezzadri](https://arxiv.org/pdf/math-ph/0609050)
 
-use std::f32::consts::LN_10;
-
 use lax::layout;
 use log::log_enabled;
 use num_traits::cast::*;
@@ -23,10 +21,11 @@ use lax::{layout::MatrixLayout, JobSvd, Lapack};
 use super::reducer::Reducer;
 
 #[cfg_attr(doc, katexit::katexit)]
-/// Dimension reduction by orthogonal matrix multiplication.
-/// The basic idea to generate a random $N(0,1)$ matrix and do a QR decomposition is in fact flawed (!!)
-/// as explained in [mezzadri](https://proceedings.mlr.press/v134/skorski21a/skorski21a.pdf).  
-/// The problem is to get an unbiaised sampling of a random orthogonal matrix to be used in Skorski algorithm
+/// Dimension reduction by orthogonal matrix multiplication.  
+/// The base idea to generate a random N(0,1) matrix and do a QR decomposition to get an orthogonal matrix.  
+/// It happens that this scheme is in fact flawed (!!) as explained in
+/// [mezzadri](https://proceedings.mlr.press/v134/skorski21a/skorski21a.pdf).  
+/// The problem is to get an unbiaised sampling of a **uniform** random orthogonal matrix to be used in Skorski algorithm
 /// to ensure distance preservation
 ///
 pub struct Romg<T: Float> {
@@ -110,6 +109,10 @@ where
         row.iter_mut().enumerate().map(|(j, x)| *x *= signs[j]);
     }
     //
+    if log::log_enabled!(log::Level::Debug) {
+        check_orthogonality(&gauss);
+    }
+    //
     gauss
 }
 
@@ -138,15 +141,9 @@ where
     }
 
     fn reduce_a(&self, data: &[&Array1<T>]) -> Vec<Array1<T>> {
-        //
-        let reduce_item = |v: &Array1<T>| -> Array1<T> {
-            let v = self.mat_reducer.dot(v);
-            v
-        };
-
         let reduced = data
             .par_iter()
-            .map(|item| reduce_item(item))
+            .map(|item| self.mat_reducer.dot(*item))
             .collect::<Vec<Array1<T>>>();
         //
         reduced
@@ -165,16 +162,16 @@ where
     let mut id = mat.t().into_owned();
     id = id.dot(mat);
     //
-    log::debug!("input mat = {:?}", id);
+    log::trace!("input mat = {:.3e}", id);
     //
     for i in 0..mat.nrows() {
         for j in 0..mat.ncols() {
             if i == j {
                 if (id[[i, j]] - T::one()).abs() > epsil {
-                    log::error!(" i : {} , j : {} , val : {:?}", i, j, id[[i, j]]);
+                    log::error!(" i : {} , j : {} , val : {:.3e}", i, j, id[[i, j]]);
                 }
             } else if (id[[i, j]]).abs() > epsil {
-                log::error!(" i : {} , j : {} , val : {:?}", i, j, id[[i, j]]);
+                log::error!(" i : {} , j : {} , val : {:.3e}", i, j, id[[i, j]]);
             }
         }
     }
@@ -197,8 +194,14 @@ mod tests {
     }
 
     // compare norm ration
-    fn check_isometry<T>(reduced: &Array1<T>, origin: &Array1<T>) -> f64 {
-        panic!("not yet implemented");
+    fn norm_ratio<T: Float + From<T>>(reduced: &[T], origin: &[T]) -> f64 {
+        let reduced_norm = reduced
+            .iter()
+            .fold(T::zero(), |acc, x| acc + *x * *x)
+            .sqrt();
+        let origin_norm = origin.iter().fold(T::zero(), |acc, x| acc + *x * *x).sqrt();
+        //
+        <f64 as num_traits::NumCast>::from(reduced_norm / origin_norm).unwrap()
     }
 
     #[test]
@@ -216,13 +219,44 @@ mod tests {
     } // end of chech_generate_romg
 
     #[test]
-    fn check_reducer() {
+    fn check_romg_reducer_a() {
         //
         log_init_test();
-        let n = 200;
-        let mut gauss: Array1<f64> = Array1::<f64>::random((n), StandardNormal);
-        let q = generate_romg::<f64>(5);
-
-        panic!("not yet implemented");
-    }
+        log::info!("in romg::check_romg_reducer_a");
+        //
+        let from_dim = 500;
+        let to_dim = 400;
+        let width = 10.;
+        let romg = Romg::new(from_dim, to_dim);
+        let nb_test: usize = 100_000;
+        //
+        let unif_01 = Uniform::<f64>::new(0., 1.);
+        let unif_range = Uniform::<f64>::new(0., width);
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
+        //
+        let data: Vec<Array1<f64>> = (0..nb_test)
+            .map(|_| unif_range.sample(&mut rng) * Array1::<f64>::random((from_dim), unif_01))
+            .collect();
+        let to_reduce: Vec<&Array1<f64>> = data.iter().map(|a| a).collect();
+        let reduced = romg.reduce_a(&to_reduce);
+        // now compare norms
+        let mut mean = 0.0_f64;
+        let mut sample = Vec::<f64>::with_capacity(nb_test);
+        for i in 0..nb_test {
+            let ratio = norm_ratio(
+                &reduced[i].as_slice().unwrap(),
+                &to_reduce[i].as_slice().unwrap(),
+            );
+            sample.push(ratio);
+            mean += ratio;
+            log::trace!("ratio : {:.3e}", ratio);
+        }
+        mean /= (nb_test as f64);
+        let mut var = sample
+            .iter()
+            .fold(0., |acc, x| acc + (x - mean) * (x - mean));
+        var /= (nb_test as f64);
+        //
+        log::info!("mean ratio : {:.3e}, sigma : {:.3e}", mean, var.sqrt());
+    } // end of check_reducer_a
 }
