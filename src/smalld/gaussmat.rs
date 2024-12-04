@@ -164,6 +164,7 @@ mod tests {
         log::info!("mean ratio : {:.3e}, sigma : {:.3e}", mean, var.sqrt());
     } // end check_gauss_reducer
 
+    // use RUST_LOG=info cargo test check_gauss_reducer_a -- --nocapture
     #[test]
     fn check_gauss_reducer_a() {
         //

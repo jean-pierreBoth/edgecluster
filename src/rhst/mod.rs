@@ -8,3 +8,6 @@
 pub mod cluster;
 pub mod point;
 pub mod rhst2;
+
+pub use cluster::*;
+pub use point::*;
