@@ -1,7 +1,4 @@
-#![allow(unused)]
-
-#[macro_use]
-extern crate lazy_static;
+use lazy_static::lazy_static;
 
 lazy_static! {
     static ref LOG: u64 = init_log();

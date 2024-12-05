@@ -3,17 +3,17 @@
 //!
 
 use cpu_time::ProcessTime;
-use log::Level::Debug;
 use std::time::{Duration, SystemTime};
 
-use dashmap::{iter, mapref::one, rayon::*, DashMap};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use lax::Lapack;
+use ndarray_rand::rand_distr::{Distribution, StandardNormal};
+
 use rayon::prelude::*;
 use std::collections::HashMap;
 
 // points are assimilated to cells of layer 0. Most cells of layer 0 should have one or very few points.
 // The algorithms is translated
-use num_traits::{cast::AsPrimitive, Float};
+use num_traits::Float;
 
 use super::point::*;
 use super::rhst2::*;
@@ -42,7 +42,8 @@ impl LayerBestTree {
         }
     }
 
-    pub fn get_layer(&self) -> u16 {
+    #[allow(unused)]
+    pub(crate) fn get_layer(&self) -> u16 {
         self.layer
     }
 
@@ -50,6 +51,7 @@ impl LayerBestTree {
         &self.best
     }
     // return true if each sub tree is initialized
+    #[allow(unused)]
     pub(crate) fn is_full(&self) -> bool {
         self.nb_subtrees == self.best.len()
     }
@@ -74,6 +76,7 @@ impl LayerBestTree {
         }
     } // end of insert
 
+    #[allow(unused)]
     pub fn get_best(&self, idx: &Vec<u16>) -> &BenefitUnit {
         let res = self.best.get(idx);
         if res.is_none() {
@@ -159,6 +162,7 @@ impl BestTree {
         //
     } // end of from_benefits
 
+    #[allow(unused)]
     pub(crate) fn get_best(&self, layer: u16, idx: &Vec<u16>) -> &BenefitUnit {
         assert!(layer > 0);
         self.bylayers[(layer - 1) as usize].get_best(idx)
@@ -175,7 +179,7 @@ impl BestTree {
         // we collect units and sort them. reverse order as higher benefits should be upper...
         for l in (0..self.bylayers.len()).rev() {
             let layer = &self.bylayers[l];
-            for (k, v) in layer.get_map() {
+            for v in layer.get_map().values() {
                 filtered_benefits.push(v.clone());
             }
         }
@@ -200,47 +204,58 @@ impl BestTree {
 pub struct Hcluster<'a, T> {
     points: Vec<&'a Point<T>>,
     //
-    space: Space,
-    //
     mindist: f64,
+    //
+    reducer: Option<&'a dyn reducer::Reducer<T>>,
+    // if we (must) reduce points dimension,
+    reduced_points: Option<Vec<Point<T>>>,
 }
 
 impl<'a, T> Hcluster<'a, T>
 where
-    T: Float + std::fmt::Debug + Sync + Send,
+    T: Float + std::fmt::Debug + Sync + Send + Lapack + ndarray::ScalarOperand,
+    StandardNormal: Distribution<T>,
 {
     /// This algorithm requires the data to have a small dimension (<= ~10).  
     /// It is possible to specify an algorithm to reduce data dimension and a target dimension (See [smalld](crate::smalld)).  
     /// If not, the algorithm will try to choose one.
-    pub fn new(points: Vec<&'a Point<T>>, reducer: Option<&dyn reducer::Reducer<T>>) -> Self {
+    pub fn new(points: Vec<&'a Point<T>>, reducer: Option<&'a dyn reducer::Reducer<T>>) -> Self {
+        //
+        log::info!("entering Hcluster::new");
         // construct space
         let (xmin, xmax) = points
             .iter()
             .map(|p| p.get_minmax())
             .fold((T::max_value(), T::min_value()), |acc, x| {
-                (acc.0.min(x.0), acc.0.max(x.1))
+                (acc.0.min(x.0), acc.1.max(x.1))
             });
         //
         let xmin: f64 = xmin.to_f64().unwrap();
         let xmax: f64 = xmax.to_f64().unwrap();
         // construct spacemesh
         let dim = points[0].get_dimension();
+
+        println!(
+            "space dimension : {}, xmin : {:.3e}, xmax : {:.3e}",
+            dim, xmin, xmax
+        );
         log::info!(
             "space dimension : {}, xmin : {:.3e}, xmax : {:.3e}",
             dim,
             xmin,
             xmax
         );
-        let space = Space::new(dim, xmin, xmax, (xmax - xmin) / 100.);
         Hcluster {
             points,
-            space,
             mindist: 0.,
+            reducer,
+            reduced_points: None,
         }
     } // end of new
 
-    pub fn cluster(&self, mindist: f64) {
+    pub fn cluster(&mut self, mindist: f64) {
         // construct space
+        self.mindist = mindist;
         let (xmin, xmax) = self
             .points
             .iter()
@@ -251,12 +266,39 @@ where
         //
         let xmin: f64 = xmin.to_f64().unwrap();
         let xmax: f64 = xmax.to_f64().unwrap();
-        log::debug!("xmin : {:.3e}, xmax : {:.3e}", xmin, xmax);
-        // construct spacemesh
         let dim = self.points[0].get_dimension();
-        let mut space = Space::new(dim, xmin, xmax, mindist);
+        log::debug!("dim : {} xmin : {:.3e}, xmax : {:.3e}", dim, xmin, xmax);
         // TODO: do we need to keep points in HCluster (we clone a vec of references)
-        let mut spacemesh = SpaceMesh::new(&mut space, self.points.clone());
+        let points_to_cluster: Vec<&Point<T>>;
+        if dim > 10 {
+            let to_dim = 10;
+            log::info!("reducing dimension from : {} to : {}", dim, to_dim);
+            // we reduce dimension
+            self.reduced_points = Some(self.reduce_points(to_dim));
+            points_to_cluster = self
+                .reduced_points
+                .as_ref()
+                .unwrap()
+                .iter()
+                .collect::<Vec<&Point<T>>>();
+        } else {
+            points_to_cluster = self.points.clone();
+        }
+        // we have points_to_cluster , we can construct space
+        let (xmin, xmax) = points_to_cluster
+            .iter()
+            .map(|p| p.get_minmax())
+            .fold((T::max_value(), T::min_value()), |acc, x| {
+                (acc.0.min(x.0), acc.0.max(x.1))
+            });
+        //
+        let xmin: f64 = xmin.to_f64().unwrap();
+        let xmax: f64 = xmax.to_f64().unwrap();
+        let dim = points_to_cluster[0].get_dimension();
+        log::info!("dim : {}, xmin : {:.3e}, xmax : {:.3e}", dim, xmin, xmax);
+        // construct spacemesh
+        let mut space = Space::new(dim, xmin, xmax, mindist);
+        let mut spacemesh = SpaceMesh::new(&mut space, points_to_cluster);
         spacemesh.embed();
         //
         spacemesh.summary();
@@ -270,6 +312,33 @@ where
         dump_benefits(&filtered_benefits);
         check_partition(&spacemesh, &filtered_benefits);
         //
+    }
+
+    // return a vector of points with reduced data dimension, label and id preserved
+    fn reduce_points(&self, to_dim: usize) -> Vec<Point<T>> {
+        let from_dim = self.points[0].get_dimension();
+        //
+        let to_reduce = self
+            .points
+            .iter()
+            .map(|p| p.get_position())
+            .collect::<Vec<&[T]>>();
+        //
+        let reduced_data = match self.reducer {
+            Some(reducer) => reducer.reduce(&to_reduce),
+            _ => {
+                let reducer = Romg::<T>::new(from_dim, to_dim);
+                reducer.reduce(&to_reduce)
+            }
+        };
+        let reduced_points: Vec<Point<T>> = self
+            .points
+            .iter()
+            .enumerate()
+            .map(|(i, p)| Point::new(p.get_id(), reduced_data[i].clone(), p.get_label()))
+            .collect();
+        //
+        reduced_points
     }
 } // end impl Hcluster
 
@@ -308,7 +377,7 @@ mod tests {
         }
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         //
-        let hcluster = Hcluster::new(refpoints, None);
+        let mut hcluster = Hcluster::new(refpoints, None);
         hcluster.cluster(mindist);
         //
     } //end of test_cluster_random
@@ -336,7 +405,7 @@ mod tests {
         let refpoints: Vec<&Point<f32>> = points.iter().map(|p| p).collect();
         // Space definition
         //
-        let hcluster = Hcluster::new(refpoints, None);
+        let mut hcluster = Hcluster::new(refpoints, None);
         hcluster.cluster(mindist);
         //
     } //end of test_cluster_exp

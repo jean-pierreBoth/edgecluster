@@ -5,18 +5,16 @@
 //! - How to generate random matrices from the classic compact groups Mezzadri 2007
 //!        See [mezzadri](https://arxiv.org/pdf/math-ph/0609050)
 
-use lax::layout;
-use log::log_enabled;
 use num_traits::cast::*;
 use num_traits::float::Float;
 
-use ndarray::{Array1, Array2, ArrayView, ArrayView1, Axis};
+use ndarray::{Array1, Array2, ArrayView1, Axis};
 use ndarray_rand::rand_distr::{Distribution, StandardNormal};
 use ndarray_rand::RandomExt;
 
 use rayon::prelude::*;
 
-use lax::{layout::MatrixLayout, JobSvd, Lapack};
+use lax::{layout::MatrixLayout, Lapack};
 
 use super::reducer::Reducer;
 
@@ -29,10 +27,10 @@ use super::reducer::Reducer;
 /// to ensure distance preservation
 ///
 pub struct Romg<T: Float> {
-    to_dim: usize,
+    _to_dim: usize,
     //
-    from_dim: usize,
-    //
+    _from_dim: usize,
+    // a projection matrix (to_dim, from_dim)
     mat_reducer: Array2<T>,
 }
 
@@ -59,8 +57,8 @@ where
         let mat_reducer = u.dot(&tmp) / lambda;
         //
         Romg {
-            to_dim,
-            from_dim,
+            _to_dim: to_dim,
+            _from_dim: from_dim,
             mat_reducer,
         }
     } // end of new
@@ -104,9 +102,9 @@ where
     }
     log::info!("nb flip sign : {}", nb_flip);
     // Now Qt = Q * Λ, R =  Λ^(-1) * t(Λ). We just have to multiply Q by Λ i.e multiply columns of Q by signs
-    for (i, mut row) in gauss.axis_iter_mut(Axis(0)).enumerate() {
+    for mut row in gauss.axis_iter_mut(Axis(0)) {
         // Perform calculations and assign to `row`; this is a trivial example:
-        row.iter_mut().enumerate().map(|(j, x)| *x *= signs[j]);
+        let _ = row.iter_mut().enumerate().map(|(j, x)| *x *= signs[j]);
     }
     //
     if log::log_enabled!(log::Level::Debug) {
@@ -123,12 +121,12 @@ where
     T: 'static + Float + Send + Sync,
 {
     //
-    fn reduce(&self, data: &[&Vec<T>]) -> Vec<Vec<T>> {
+    fn reduce(&self, data: &[&[T]]) -> Vec<Vec<T>> {
         //
-        let reduce_item = |v: &Vec<T>| -> Vec<T> {
+        let reduce_item = |v: &[T]| -> Vec<T> {
             let v = self
                 .mat_reducer
-                .dot(&ArrayView1::from_shape((v.len()), v).unwrap());
+                .dot(&ArrayView1::from_shape(v.len(), v).unwrap());
             v.to_vec()
         };
 
@@ -180,14 +178,14 @@ where
 //======================================
 
 mod tests {
-
+    #![allow(unused)]
     use super::*;
 
     use rand::distributions::Uniform;
     use rand::prelude::*;
-    use rand_xoshiro::Xoshiro256PlusPlus;
 
-    use rand_distr::{Distribution, Exp};
+    #[allow(unused)]
+    use rand_xoshiro::Xoshiro256PlusPlus;
 
     fn log_init_test() {
         let _ = env_logger::builder().is_test(true).try_init();
@@ -235,7 +233,7 @@ mod tests {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         //
         let data: Vec<Array1<f64>> = (0..nb_test)
-            .map(|_| unif_range.sample(&mut rng) * Array1::<f64>::random((from_dim), unif_01))
+            .map(|_| unif_range.sample(&mut rng) * Array1::<f64>::random(from_dim, unif_01))
             .collect();
         let to_reduce: Vec<&Array1<f64>> = data.iter().map(|a| a).collect();
         let reduced = romg.reduce_a(&to_reduce);
@@ -251,11 +249,11 @@ mod tests {
             mean += ratio;
             log::trace!("ratio : {:.3e}", ratio);
         }
-        mean /= (nb_test as f64);
+        mean /= nb_test as f64;
         let mut var = sample
             .iter()
             .fold(0., |acc, x| acc + (x - mean) * (x - mean));
-        var /= (nb_test as f64);
+        var /= nb_test as f64;
         //
         log::info!("mean ratio : {:.3e}, sigma : {:.3e}", mean, var.sqrt());
     } // end of check_reducer_a

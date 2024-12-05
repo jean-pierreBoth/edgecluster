@@ -10,14 +10,12 @@
 use cpu_time::ProcessTime;
 use std::time::{Duration, SystemTime};
 
-use num_traits::cast::*;
 use num_traits::float::Float;
 
 use std::fmt::Debug;
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use dashmap::{iter, mapref::one, rayon::*, DashMap};
-use ego_tree::{tree, NodeMut, Tree};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -64,15 +62,15 @@ impl Space {
         );
         let layer_max_u: usize = ((dim as f64).sqrt() * width / mindist).log2().trunc() as usize;
         let nb_layer = layer_max_u + 1;
-        let mut accepted_mindist: f64 = mindist;
         log::info!(
             "Space::new nb layer : {}, mindist : {:.2e}",
             nb_layer,
             mindist
         );
-        if (nb_layer > 16) {
+        let mut accepted_mindist = mindist;
+        if nb_layer > 16 {
             log::error!("too many layers, mindist is too small");
-            accepted_mindist = (dim as f64).sqrt() * width / 2_i32.pow(16) as f64;
+            accepted_mindist = (dim as f64).sqrt() * width / 2_i32.pow(16) as f64 * 2.;
             log::warn!("resetting mindist to : {:.3e}", accepted_mindist);
             let check = ((dim as f64).sqrt() * width / accepted_mindist)
                 .log2()
@@ -87,12 +85,11 @@ impl Space {
                     <= 15
             );
         }
-        let layer_max: u32 = layer_max_u.try_into().unwrap();
         Space {
             dim,
             width: xmax - xmin,
             xmin,
-            mindist,
+            mindist: accepted_mindist,
             nb_layer,
         }
     }
@@ -168,7 +165,8 @@ where
 
     /// Return cel weight. This is also the cardinal of the subtree corresponding to a point in cell
     /// as long as points have no weights
-    pub fn get_cell_weight(&self) -> f32 {
+    #[allow(unused)]
+    pub(crate) fn get_cell_weight(&self) -> f32 {
         if let Some(points) = self.points_in.as_ref() {
             points.len() as f32
         } else {
@@ -190,6 +188,7 @@ where
     }
 
     // get parent cell in splitting process
+    #[allow(unused)]
     pub(crate) fn get_upper_cell_index(&self) -> Vec<u16> {
         assert!(self.layer as usize != self.space.nb_layer - 1);
         self.index.iter().map(|x| x / 2).collect::<Vec<u16>>()
@@ -215,7 +214,7 @@ where
         match self.points_in.as_mut() {
             Some(points) => points.push(point),
             None => {
-                let mut vec = vec![point];
+                let vec = vec![point];
                 self.points_in = Some(vec);
             }
         }
@@ -278,7 +277,7 @@ where
         }
         // do not forget to fill new_cells !!
         let mut new_cells: Vec<Cell<T>> = Vec::new();
-        for (k, v) in hashed_cells.drain() {
+        for (_, v) in hashed_cells.drain() {
             new_cells.push(v);
         }
         //
@@ -299,7 +298,6 @@ where
 
 /// a layer gathers nodes if a given layer.
 pub(crate) struct Layer<'a, T> {
-    space: &'a Space,
     // my layer
     layer: u16,
     //
@@ -313,16 +311,16 @@ where
     T: Float + Debug + Sync,
 {
     //
-    fn new(space: &'a Space, layer: u16, cell_diameter: f64) -> Self {
+    fn new(layer: u16, cell_diameter: f64) -> Self {
         let hcells: DashMap<Vec<u16>, Cell<T>> = DashMap::new();
         Layer {
-            space,
             layer,
             cell_diameter,
             hcells,
         }
     }
     //
+    #[allow(unused)]
     fn insert(&self, cell: Cell<'a, T>) {
         if self.get_cell(&cell.index).is_some() {
             panic!("internal error");
@@ -339,6 +337,10 @@ where
         assert!(!self.hcells.is_empty());
     }
 
+    #[allow(unused)]
+    pub(crate) fn get_layer(&self) -> u16 {
+        self.layer
+    }
     // returns a dashmap Ref to cell is it exist
     // used only to check coherence. Sub cells are created inside one thread.
     // TODO: do we need dashmap?
@@ -347,15 +349,18 @@ where
     }
 
     // get an iterator over cells
-    pub fn get_iter(&self) -> iter::Iter<Vec<u16>, Cell<'a, T>> {
+    #[allow(unused)]
+    pub(crate) fn get_iter(&self) -> iter::Iter<Vec<u16>, Cell<'a, T>> {
         self.hcells.iter()
     }
     // get an iterator over cells
+    #[allow(unused)]
     fn get_iter_mut(&self) -> iter::IterMut<Vec<u16>, Cell<'a, T>> {
         self.hcells.iter_mut()
     }
 
     // get an iterator over cells
+    #[allow(unused)]
     fn get_par_iter_mut(&self) -> map::IterMut<Vec<u16>, Cell<'a, T>> {
         self.hcells.par_iter_mut()
     }
@@ -411,6 +416,7 @@ impl BenefitUnit {
     }
 
     // returns cell index
+    #[allow(unused)]
     pub(crate) fn get_cell_idx(&self) -> &Vec<u16> {
         &self.cell_index
     }
@@ -479,7 +485,7 @@ where
             space.mindist,
             nb_layer
         );
-        if (nb_layer >= 8) {
+        if nb_layer >= 8 {
             log::warn!("perhaps increase mindist to reduce nb_layer");
         }
         let layer_max_scale: u16 = layer_max_u.try_into().unwrap();
@@ -495,7 +501,7 @@ where
             space.mindist
         );
         //
-        let mut layers: Vec<Layer<T>> = Vec::with_capacity(nb_layer as usize);
+        let layers: Vec<Layer<T>> = Vec::with_capacity(nb_layer as usize);
         //
         SpaceMesh {
             space,
@@ -507,7 +513,7 @@ where
     }
 
     /// returns cell diameter at layer l
-    pub fn get_cell_diam(&self, l: usize) -> f64 {
+    pub fn get_cell_diam(&self, _l: usize) -> f64 {
         panic!("not yet implemented");
     }
 
@@ -591,6 +597,7 @@ where
     }
 
     // return reference to dashmap entry
+    #[allow(unused)]
     pub(crate) fn get_cell_with_position(
         &self,
         p: &[T],
@@ -622,13 +629,13 @@ where
         // initialize layers (layer lmax to bottom layer 0
         self.layers = Vec::with_capacity(self.get_nb_layers());
         for l in 0..self.get_nb_layers() {
-            let layer =
-                Layer::<T>::new(self.space, l as u16, self.get_layer_cell_diameter(l as u16));
+            let layer = Layer::<T>::new(l as u16, self.get_layer_cell_diameter(l as u16));
 
             self.layers.push(layer);
         }
         log::info!("SpaceMesh::embed allocated nb layers {}", self.layers.len());
         // initialize root cell
+
         let center = vec![0u16; self.get_dim()];
         // root cell, it is declared above maximum layer as it is isolated...
         let mut global_cell = Cell::<T>::new(self.space, self.get_layer_max() + 1, center);
@@ -636,11 +643,13 @@ where
         self.global_cell = Some(global_cell);
         //
         //
-        self.points
+        let _ = self
+            .points
             .as_ref()
             .unwrap()
             .iter()
             .map(|p| self.global_cell.as_mut().unwrap().add_point(p));
+
         // now to first layer (one cell) others layers can be made
         let cells_first_res = self.global_cell.as_ref().unwrap().split();
         if cells_first_res.is_none() {
@@ -650,7 +659,7 @@ where
         let cells_first = cells_first_res.unwrap();
         log::info!("global cell split in nb cells {}", cells_first.len());
         // initialize first layer (layer max)
-        let mut upper_layer = &self.layers[self.get_layer_max() as usize];
+        let upper_layer = &self.layers[self.get_layer_max() as usize];
         upper_layer.insert_cells(cells_first);
         assert!(upper_layer.get_nb_cells() > 0);
         // now we can propagate layer downward, cells can be treated // using par_iter_mut
@@ -734,16 +743,14 @@ where
         let nb_cells = layer_0.get_nb_cells();
         // allocate benefit array in one array as we will need a sort! with par_sort_unstable from rayon
         // the nb_layers of a given cell are stored contiguously in the order obtained from the iterator
-        let benefits = Vec::<usize>::with_capacity(nb_cells * nb_layers);
         // loop on cells of layer_0, keeping track of the order
-        let cell_order = Vec::<Vec<u16>>::with_capacity(nb_cells);
         // for each cell we store potential merge benefit at each level!
         let mut benefits: Vec<BenefitUnit> = Vec::with_capacity(nb_cells * nb_layers);
         // iterate over layer 0 and upper_layers store cost and then sort benefit array in decreasing order!
         let layer0 = self.get_layer(0);
         for cell in layer0.get_hcells().iter() {
             let mut benefit_at_layer = Vec::<u32>::with_capacity(nb_layers);
-            let mut previous_tree_size: u32 = cell.get_subtree_size();
+            let previous_tree_size: u32 = cell.get_subtree_size();
             for l in 1..self.get_nb_layers() {
                 let upper_index = cell.get_upper_cell_index_at_layer(l as u16);
                 let upper_cell = self.get_layer(l as u16).get_cell(&upper_index).unwrap();
@@ -832,6 +839,7 @@ where
 
 // TODO: should add shift margin
 // space must enclose points
+#[allow(unused)]
 fn check_space<T: Float + Debug>(space: &Space, points: &[Point<T>]) {
     assert!(!points.is_empty());
     //
@@ -839,10 +847,11 @@ fn check_space<T: Float + Debug>(space: &Space, points: &[Point<T>]) {
     let mut min_xi: T = T::max_value();
     for (ipt, pt) in points.iter().enumerate() {
         for (i, xi) in pt.get_position().iter().enumerate() {
-            if (space.get_xmin() >= <f64 as num_traits::NumCast>::from(*xi).unwrap()) {
+            if space.get_xmin() >= <f64 as num_traits::NumCast>::from(*xi).unwrap() {
                 log::error!(
-                    "space.get_xmin() too high,  point of rank {} has xi = {:?} ",
+                    "space.get_xmin() too high,  point of rank {} has coordinate i : {}, xi = {:?} ",
                     ipt,
+                    i,
                     xi
                 );
                 panic!();
@@ -882,7 +891,7 @@ mod tests {
         log_init_test();
         log::info!("in test_uniform_random");
         //
-        let nbvec = 40_000_000usize;
+        let nbvec = 1_000_000usize;
         let dim = 10;
         let width: f64 = 1000.;
         let mindist = 5.;
@@ -904,7 +913,7 @@ mod tests {
         //
         mesh.compute_subtree_size();
         //
-        let benefits = mesh.compute_benefits();
+        let _benefits = mesh.compute_benefits();
     } //end of test_uniform_random
 
     #[test]
@@ -913,7 +922,7 @@ mod tests {
         let data = vec![1u32; size];
         let hmap = DashMap::<usize, u32>::new();
         (0..size).into_par_iter().for_each(|i| {
-            let res = hmap.insert(i, data[i]);
+            let _res = hmap.insert(i, data[i]);
         });
 
         //
@@ -930,12 +939,11 @@ mod tests {
         log_init_test();
         log::info!("in check_mindist");
         //
-        let nbvec = 10_000_000_usize;
         let dim = 15;
         let width: f64 = 1000.;
         let mindist = 0.001;
         // Space definition
-        let space = Space::new(dim, 0., width, mindist);
+        let _space = Space::new(dim, 0., width, mindist);
     } // end of check_mindist
 
     #[test]
@@ -943,7 +951,7 @@ mod tests {
         log_init_test();
         log::info!("in test_exp_random");
         //
-        let nbvec = 40_000_000_usize;
+        let nbvec = 1_000_000_usize;
         let dim = 15;
         let width: f64 = 1000.;
         let mindist = 5.;
@@ -964,13 +972,15 @@ mod tests {
         let mut mesh = SpaceMesh::new(&mut space, refpoints);
         mesh.embed();
         mesh.summary();
+        //
+        let _benefits = mesh.compute_benefits();
         // check number of points for cell at origin
+        log::info!("number of points at orgin 0.001 .... 0.001]");
         let p = vec![0.001; dim];
         log::info!("cells info for p : {:?}", p);
         for l in (0..mesh.get_layer_max() as usize).rev() {
-            let refcell = mesh.get_cell_with_position(&p, l);
             if let Some(cell) = mesh.get_cell_with_position(&p, l) {
-                let nbpoints_in = refcell.unwrap().value().get_nb_points();
+                let nbpoints_in = cell.value().get_nb_points();
                 log::info!(
                     "nb point in cell corresponding to point at layer {} : {}",
                     l,

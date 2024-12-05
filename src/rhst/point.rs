@@ -1,11 +1,8 @@
 //! defines data description
 
-use num_traits::cast::*;
 use num_traits::float::Float;
 
 use std::fmt::Debug;
-
-type NodeId = usize;
 
 /// data to cluster identifier
 pub type PointId = usize;
@@ -32,6 +29,11 @@ where
         self.label
     }
 
+    /// get id
+    pub fn get_id(&self) -> PointId {
+        self.id
+    }
+
     /// gets the points coordinate
     pub fn get_position(&self) -> &[T] {
         &self.p
@@ -42,7 +44,7 @@ where
         self.p
             .iter()
             .fold((T::max_value(), T::min_value()), |acc, x| {
-                (acc.0.min(*x), acc.0.max(*x))
+                (acc.0.min(*x), acc.1.max(*x))
             })
     }
 

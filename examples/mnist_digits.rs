@@ -19,6 +19,13 @@ use utils::mnistio::*;
 const MNIST_DIGITS_DIR: &str = "/home/jpboth/Data/ANN/MNIST/";
 
 pub fn main() {
+    //
+    let _ = env_logger::builder().try_init().unwrap();
+    log::info!(
+        "in mnist_digits, reading mnist data...from {}",
+        MNIST_DIGITS_DIR
+    );
+    //
     let mut image_fname = String::from(MNIST_DIGITS_DIR);
     image_fname.push_str("train-images-idx3-ubyte");
     let image_path = PathBuf::from(image_fname.clone());
@@ -93,14 +100,15 @@ pub fn main() {
     //
     // define points
     //
+    log::info!("start...");
     let points: Vec<Point<f32>> = (0..labels.len())
         .map(|i| Point::<f32>::new(i, images_as_v[i].clone(), labels[i] as u32))
         .collect();
     let ref_points = points.iter().map(|p| p).collect();
     // distance is normalized by pixel. Value of pixel between 0 and 256
-    let mindist = 20.;
+    let mindist = 2.;
     // cluster without specifying a dimension reducer
-    let hcluster = Hcluster::new(ref_points, None);
+    let mut hcluster = Hcluster::new(ref_points, None);
     hcluster.cluster(mindist);
     //
     let cpu_time: Duration = cpu_start.elapsed();

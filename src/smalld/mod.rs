@@ -8,3 +8,7 @@
 pub mod gaussmat;
 pub mod reducer;
 pub mod romg;
+
+pub use gaussmat::*;
+pub use reducer::*;
+pub use romg::*;

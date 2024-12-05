@@ -1,10 +1,9 @@
 //! dimension reduction using multiplication by full gaussion matrix
 //! Used in cunjunction with rhst when we do not need sparsity
 
-use num_traits::cast::*;
 use num_traits::float::Float;
 
-use ndarray::{Array1, Array2, ArrayView, ArrayView1};
+use ndarray::{Array1, Array2, ArrayView1};
 use ndarray_rand::rand_distr::{Distribution, StandardNormal};
 use ndarray_rand::RandomExt;
 
@@ -16,7 +15,7 @@ use super::reducer::Reducer;
 pub struct GaussianMat<T: Float> {
     to_dim: usize,
     //
-    from_dim: usize,
+    _from_dim: usize,
     //
     gauss: Array2<T>,
 }
@@ -30,7 +29,7 @@ where
         let gauss: Array2<T> = Array2::<T>::random((to_dim, from_dim), StandardNormal);
         GaussianMat {
             to_dim,
-            from_dim,
+            _from_dim: from_dim,
             gauss,
         }
     }
@@ -41,19 +40,16 @@ where
     T: 'static + Send + Sync + Float,
 {
     /// reduce dimension of data, returning reduced data
-    fn reduce(&self, data: &[&Vec<T>]) -> Vec<Vec<T>> {
-        //
-        let mut reduced_data = Vec::<Vec<T>>::with_capacity(data.len());
+    fn reduce(&self, data: &[&[T]]) -> Vec<Vec<T>> {
         //
         let reduce_item = |item: &[T]| -> Vec<T> {
             let f: T = T::from(self.to_dim).unwrap().sqrt();
             let small_item = (0..self.to_dim)
                 .map(|i| {
-                    (self
-                        .gauss
+                    self.gauss
                         .row(i)
-                        .dot(&ArrayView1::from_shape((item.len()), item).unwrap())
-                        / f)
+                        .dot(&ArrayView1::from_shape(item.len(), item).unwrap())
+                        / f
                 })
                 .collect();
             small_item
@@ -74,11 +70,10 @@ where
             let f: T = T::from(self.to_dim).unwrap().sqrt();
             let small_item = (0..self.to_dim)
                 .map(|i| {
-                    (self
-                        .gauss
+                    self.gauss
                         .row(i)
-                        .dot(&ArrayView1::from_shape((item.len()), item).unwrap())
-                        / f)
+                        .dot(&ArrayView1::from_shape(item.len(), item).unwrap())
+                        / f
                 })
                 .collect();
             small_item
@@ -94,14 +89,13 @@ where
 } // end of impl Reduce
 
 mod tests {
+    #![allow(unused)]
 
     use super::*;
 
     use rand::distributions::Uniform;
     use rand::prelude::*;
     use rand_xoshiro::Xoshiro256PlusPlus;
-
-    use rand_distr::{Distribution, Exp};
 
     fn log_init_test() {
         let _ = env_logger::builder().is_test(true).try_init();
@@ -123,7 +117,6 @@ mod tests {
         log_init_test();
         log::info!("in test_uniform_random");
         //
-        let nbvec = 100_000usize;
         let from_dim = 500;
         let to_dim = 50;
         let width: f64 = 10.;
@@ -142,7 +135,7 @@ mod tests {
             })
             .collect();
         // reduce dim
-        let to_reduce: Vec<&Vec<f64>> = data_large.iter().map(|v| v).collect();
+        let to_reduce: Vec<&[f64]> = data_large.iter().map(|v| v.as_slice()).collect();
         let mat = GaussianMat::<f64>::new(from_dim, to_dim);
         let reduced = mat.reduce(&to_reduce);
         //
@@ -155,11 +148,11 @@ mod tests {
             mean += ratio;
             log::debug!("ratio : {:.3e}", ratio);
         }
-        mean /= (nb_test as f64);
+        mean /= nb_test as f64;
         let mut var = sample
             .iter()
             .fold(0., |acc, x| acc + (x - mean) * (x - mean));
-        var /= (nb_test as f64);
+        var /= nb_test as f64;
         //
         log::info!("mean ratio : {:.3e}, sigma : {:.3e}", mean, var.sqrt());
     } // end check_gauss_reducer
@@ -181,7 +174,7 @@ mod tests {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         //
         let data: Vec<Array1<f64>> = (0..nb_test)
-            .map(|_| unif_range.sample(&mut rng) * Array1::<f64>::random((from_dim), unif_01))
+            .map(|_| unif_range.sample(&mut rng) * Array1::<f64>::random(from_dim, unif_01))
             .collect();
         let to_reduce: Vec<&Array1<f64>> = data.iter().map(|a| a).collect();
         let reduced = mat.reduce_a(&to_reduce);
@@ -197,11 +190,11 @@ mod tests {
             mean += ratio;
             log::trace!("ratio : {:.3e}", ratio);
         }
-        mean /= (nb_test as f64);
+        mean /= nb_test as f64;
         let mut var = sample
             .iter()
             .fold(0., |acc, x| acc + (x - mean) * (x - mean));
-        var /= (nb_test as f64);
+        var /= nb_test as f64;
         //
         log::info!("mean ratio : {:.3e}, sigma : {:.3e}", mean, var.sqrt());
     } // end of check_reducer_a
