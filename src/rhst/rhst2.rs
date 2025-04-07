@@ -183,10 +183,27 @@ where
         }
     } // end of get_nb_point
 
+    pub(crate) fn get_points(&self) -> Option<&Vec<&Point<T>>> {
+        self.points_in.as_ref()
+    }
+
     fn get_cell_index(&self) -> &[u16] {
         &self.index
     }
 
+    #[allow(unused)]
+    pub(crate) fn has_point(&self, pid: PointId) -> bool {
+        if self.points_in.is_none() {
+            return false;
+        } else {
+            for p in self.points_in.as_ref().unwrap() {
+                if p.get_id() == pid {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
     // get parent cell in splitting process
     #[allow(unused)]
     pub(crate) fn get_upper_cell_index(&self) -> Vec<u16> {
@@ -607,6 +624,13 @@ where
         self.layers[l].get_cell(&idx)
     }
 
+    pub(crate) fn get_cell(
+        &self,
+        idx: &[u16],
+        layer: u16,
+    ) -> Option<one::Ref<Vec<u16>, Cell<'a, T>>> {
+        self.layers[layer as usize].get_cell(idx)
+    }
     /// for layer 0, the layer with the maximum number of cells,
     /// the diameter of a cell is $$ width * \sqrt(d)/2^(nb_layer + 1 - layer)  $$
     ///  - Delta max value of  extension by dimension
@@ -641,14 +665,6 @@ where
         let mut global_cell = Cell::<T>::new(self.space, self.get_layer_max() + 1, center);
         global_cell.init_points(&self.points.as_ref().unwrap().clone());
         self.global_cell = Some(global_cell);
-        //
-        //
-        let _ = self
-            .points
-            .as_ref()
-            .unwrap()
-            .iter()
-            .map(|p| self.global_cell.as_mut().unwrap().add_point(p));
 
         // now to first layer (one cell) others layers can be made
         let cells_first_res = self.global_cell.as_ref().unwrap().split();
@@ -782,6 +798,74 @@ where
         benefits
     } // end of compute_benefits
 
+    #[allow(unused)]
+    pub(crate) fn get_partition_by_size(
+        &self,
+        p_size: usize,
+        benefit_units: &[BenefitUnit],
+    ) -> HashMap<PointId, u32> {
+        //
+        let nb_points = self.get_nb_points();
+        log::info!(
+            "dispatching nbpoints: {}, in {} clusters",
+            nb_points,
+            p_size
+        );
+        let mut clusters = HashMap::<PointId, u32>::with_capacity(nb_points);
+        //
+        for i in 0..p_size {
+            let unit = &benefit_units[i];
+            let (idx, layer) = unit.get_id();
+            // get cell
+            let ref_cell = self.get_cell(idx, layer).unwrap();
+            let unit_cell = ref_cell.value();
+            log::debug!(
+                "cell : {:?}, layer : {}, nb points : {}",
+                idx,
+                layer,
+                unit_cell.get_nb_points()
+            );
+            let points = unit_cell.get_points().unwrap();
+            // what is exclusively in unit i and not in sub-sequent units
+            for point in points.iter() {
+                let mut j = i + 1;
+                let found: bool = loop {
+                    if unit_cell.has_point(point.get_id()) {
+                        break true;
+                    } else {
+                        if j < p_size - 1 {
+                            j = j + 1;
+                        } else {
+                            break false;
+                        }
+                    }
+                };
+                if !found {
+                    // point is exclusevily in cell i
+                    if let Some(old) = clusters.insert(point.get_id(), i as u32) {
+                        log::error!(
+                            "point id {:?} was already inserted in cluster : {:?}",
+                            point.get_id(),
+                            old
+                        );
+                        log::info!(
+                            "number of points dispatched in clusters : {:?}",
+                            clusters.len()
+                        );
+                        panic!();
+                    }
+                }
+            }
+        }
+        log::info!(
+            "points to dispatch : {}, nb points in clusters : {}",
+            nb_points,
+            clusters.len()
+        );
+        //
+        clusters
+    }
+
     // we need to compute cardinal of each subtree (all descendants of each cell)
     // just dispatch number of points
     fn compute_subtree_size(&self) {
@@ -876,7 +960,7 @@ mod tests {
 
     use super::*;
 
-    use rand::distributions::Uniform;
+    use rand::distr::Uniform;
     use rand::prelude::*;
     use rand_xoshiro::Xoshiro256PlusPlus;
 
@@ -895,7 +979,7 @@ mod tests {
         let dim = 10;
         let width: f64 = 1000.;
         let mindist = 5.;
-        let unif_01 = Uniform::<f64>::new(0., width);
+        let unif_01 = Uniform::<f64>::new(0., width).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         let mut points: Vec<Point<f64>> = Vec::with_capacity(nbvec);
         for i in 0..nbvec {

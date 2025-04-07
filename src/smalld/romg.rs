@@ -9,8 +9,8 @@ use num_traits::cast::*;
 use num_traits::float::Float;
 
 use ndarray::{Array1, Array2, ArrayView1, Axis};
-use ndarray_rand::rand_distr::{Distribution, StandardNormal};
-use ndarray_rand::RandomExt;
+
+use rand_distr::{Distribution, Normal, StandardNormal};
 
 use rayon::prelude::*;
 
@@ -68,10 +68,16 @@ where
 // As our matrices are Float (and not Complex) the diagonal matrix Λ of Mezzadri is made of values 1. andf -1. and so is its own inverse.
 fn generate_romg<T>(n: usize) -> Array2<T>
 where
-    StandardNormal: Distribution<T>,
     T: Float + Lapack + ndarray::ScalarOperand,
+    StandardNormal: Distribution<T>,
 {
-    let mut gauss: Array2<T> = Array2::<T>::random((n, n), StandardNormal);
+    let mut gauss: Array2<T> = Array2::<T>::zeros((n, n));
+    let normal = Normal::new(T::zero(), T::one()).unwrap();
+    for i in 0..n {
+        for j in 0..n {
+            gauss[[i, j]] = normal.sample(&mut rand::rng());
+        }
+    }
     // do a QR decomposition
     let layout = MatrixLayout::C {
         row: gauss.nrows() as i32,
@@ -181,7 +187,7 @@ mod tests {
     #![allow(unused)]
     use super::*;
 
-    use rand::distributions::Uniform;
+    use rand::distr::Uniform;
     use rand::prelude::*;
 
     #[allow(unused)]
@@ -228,13 +234,19 @@ mod tests {
         let romg = Romg::new(from_dim, to_dim);
         let nb_test: usize = 100_000;
         //
-        let unif_01 = Uniform::<f64>::new(0., 1.);
-        let unif_range = Uniform::<f64>::new(0., width);
+        let unif_01 = Uniform::<f64>::new(0., 1.).unwrap();
+        let unif_range = Uniform::<f64>::new(0., width).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         //
-        let data: Vec<Array1<f64>> = (0..nb_test)
-            .map(|_| unif_range.sample(&mut rng) * Array1::<f64>::random(from_dim, unif_01))
-            .collect();
+        let mut data = Vec::<Array1<f64>>::new();
+        for i in 0..nb_test {
+            let mut rand1d = Array1::<f64>::zeros(from_dim);
+            let scale = unif_range.sample(&mut rng);
+            for j in 0..from_dim {
+                rand1d[j] = scale * unif_01.sample(&mut rng);
+            }
+            data.push(rand1d);
+        }
         let to_reduce: Vec<&Array1<f64>> = data.iter().map(|a| a).collect();
         let reduced = romg.reduce_a(&to_reduce);
         // now compare norms

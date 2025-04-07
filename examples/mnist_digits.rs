@@ -6,8 +6,8 @@
 
 // use clap::{Arg, ArgAction, ArgMatches, Command};
 use ndarray::s;
-use std::fs::OpenOptions;
 use std::path::PathBuf;
+use std::{collections::HashMap, fs::OpenOptions};
 
 use cpu_time::ProcessTime;
 use std::time::{Duration, SystemTime};
@@ -20,7 +20,7 @@ const MNIST_DIGITS_DIR: &str = "/home/jpboth/Data/ANN/MNIST/";
 
 pub fn main() {
     //
-    let _ = env_logger::builder().try_init().unwrap();
+    let _ = env_logger::builder().is_test(true).try_init().unwrap();
     log::info!(
         "in mnist_digits, reading mnist data...from {}",
         MNIST_DIGITS_DIR
@@ -95,21 +95,32 @@ pub fn main() {
         images_as_v.append(&mut test_images_as_v);
     } // drop mnist_test_data
       //
-    let cpu_start = ProcessTime::now();
-    let sys_now = SystemTime::now();
-    //
-    // define points
-    //
+      // define points
+      //
     log::info!("start...");
     let points: Vec<Point<f32>> = (0..labels.len())
         .map(|i| Point::<f32>::new(i, images_as_v[i].clone(), labels[i] as u32))
         .collect();
     let ref_points = points.iter().map(|p| p).collect();
+    //
+    let mut labels_distribution = HashMap::<u32, u32>::with_capacity(10);
+    for p in &points {
+        if let Some(count) = labels_distribution.get_mut(&p.get_label()) {
+            *count += 1;
+        } else {
+            labels_distribution.insert(p.get_label(), 1);
+        }
+    }
+    for (l, count) in labels_distribution {
+        println!("label : {}, count : {}", l, count);
+    }
+    let cpu_start = ProcessTime::now();
+    let sys_now = SystemTime::now();
     // distance is normalized by pixel. Value of pixel between 0 and 256
     let mindist = 2.;
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(ref_points, None);
-    hcluster.cluster(mindist);
+    hcluster.cluster(mindist, 10);
     //
     let cpu_time: Duration = cpu_start.elapsed();
     println!(

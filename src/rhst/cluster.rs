@@ -3,10 +3,11 @@
 //!
 
 use cpu_time::ProcessTime;
+use rand_distr::{Distribution, StandardNormal};
 use std::time::{Duration, SystemTime};
 
 use lax::Lapack;
-use ndarray_rand::rand_distr::{Distribution, StandardNormal};
+// use ndarray_rand::rand_distr::{Distribution, StandardNormal};
 
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -253,7 +254,7 @@ where
         }
     } // end of new
 
-    pub fn cluster(&mut self, mindist: f64) {
+    pub fn cluster(&mut self, mindist: f64, nb_cluster: usize) {
         // construct space
         self.mindist = mindist;
         let (xmin, xmax) = self
@@ -308,10 +309,14 @@ where
         best_tree.get_benefits(&benefits);
 
         let filtered_benefits = best_tree.get_filtered_benefits();
+
         log::info!("dump of BestTree::get_filtered_benefits");
         dump_benefits(&filtered_benefits);
         check_partition(&spacemesh, &filtered_benefits);
         //
+        // we have benefits, we can try to cluster
+        //
+        let _clusters = spacemesh.get_partition_by_size(nb_cluster, &filtered_benefits);
     }
 
     // return a vector of points with reduced data dimension, label and id preserved
@@ -349,7 +354,7 @@ mod tests {
 
     use super::*;
 
-    use rand::distributions::Uniform;
+    use rand::distr::Uniform;
     use rand::prelude::*;
     use rand_xoshiro::Xoshiro256PlusPlus;
 
@@ -362,23 +367,27 @@ mod tests {
     #[test]
     fn test_cluster_random() {
         log_init_test();
-        log::info!("in test_uniform_random");
-        //
+        log::info!("in test_cluster_random");
+        // points are generated around 5 centers/labels
         let nbvec = 1_000_000usize;
         let dim = 5;
-        let width: f64 = 100.;
+        let width: f64 = 1.;
         let mindist = 5.;
-        let unif_01 = Uniform::<f64>::new(0., width);
+        let unif_01 = Uniform::<f64>::new(0., width).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         let mut points: Vec<Point<f64>> = Vec::with_capacity(nbvec);
         for i in 0..nbvec {
-            let p: Vec<f64> = (0..dim).map(|_| unif_01.sample(&mut rng)).collect();
+            let label = i % 5;
+            let offset = label as f64 * 15.;
+            let p: Vec<f64> = (0..dim)
+                .map(|_| offset + unif_01.sample(&mut rng))
+                .collect();
             points.push(Point::<f64>::new(i, p, (i % 5).try_into().unwrap()));
         }
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         //
         let mut hcluster = Hcluster::new(refpoints, None);
-        hcluster.cluster(mindist);
+        hcluster.cluster(mindist, 5);
         //
     } //end of test_cluster_random
 
@@ -406,7 +415,7 @@ mod tests {
         // Space definition
         //
         let mut hcluster = Hcluster::new(refpoints, None);
-        hcluster.cluster(mindist);
+        hcluster.cluster(mindist, 5);
         //
     } //end of test_cluster_exp
 } // end of tests
