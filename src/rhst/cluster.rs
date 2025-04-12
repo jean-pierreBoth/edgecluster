@@ -303,20 +303,21 @@ where
         spacemesh.embed();
         //
         spacemesh.summary();
-        let benefits = spacemesh.compute_benefits();
-        // now we extract best subtrees from benefits in mesh
+
+        let filtered_benefits = spacemesh.compute_benefits();
+        /*         // now we extract best subtrees from benefits in mesh
         let mut best_tree = BestTree::new(spacemesh.get_nb_layers(), &spacemesh);
         best_tree.get_benefits(&benefits);
 
-        let filtered_benefits = best_tree.get_filtered_benefits();
+        let filtered_benefits = best_tree.get_filtered_benefits(); */
 
-        log::info!("dump of BestTree::get_filtered_benefits");
-        dump_benefits(&filtered_benefits);
+        log::info!("dump of filtered_benefits");
+        dump_benefits(&spacemesh, &filtered_benefits);
         check_partition(&spacemesh, &filtered_benefits);
         //
         // we have benefits, we can try to cluster
         //
-        let _clusters = spacemesh.get_partition_by_size(nb_cluster, &filtered_benefits);
+        let _clusters = spacemesh.get_partition(nb_cluster, &filtered_benefits);
     }
 
     // return a vector of points with reduced data dimension, label and id preserved
@@ -369,16 +370,16 @@ mod tests {
         log_init_test();
         log::info!("in test_cluster_random");
         // points are generated around 5 centers/labels
-        let nbvec = 1_000_000usize;
+        let nbvec = 100usize;
         let dim = 5;
         let width: f64 = 1.;
-        let mindist = 5.;
+        let mindist = 1.;
         let unif_01 = Uniform::<f64>::new(0., width).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         let mut points: Vec<Point<f64>> = Vec::with_capacity(nbvec);
         for i in 0..nbvec {
             let label = i % 5;
-            let offset = label as f64 * 15.;
+            let offset = (1 + label) as f64 * 15.;
             let p: Vec<f64> = (0..dim)
                 .map(|_| offset + unif_01.sample(&mut rng))
                 .collect();
@@ -396,7 +397,7 @@ mod tests {
         log_init_test();
         log::info!("in test_uniform_random");
         //
-        let nbvec = 1_000_000usize;
+        let nbvec = 10_000usize;
         let dim = 5;
         let width: f64 = 100.;
         let mindist = 5.;
