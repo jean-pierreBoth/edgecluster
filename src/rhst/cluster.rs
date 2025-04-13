@@ -203,6 +203,8 @@ impl BestTree {
 //==========================
 
 pub struct Hcluster<'a, T> {
+    debug_level: usize,
+    //
     points: Vec<&'a Point<T>>,
     //
     mindist: f64,
@@ -247,12 +249,17 @@ where
             xmax
         );
         Hcluster {
+            debug_level: 0,
             points,
             mindist: 0.,
             reducer,
             reduced_points: None,
         }
     } // end of new
+
+    pub fn set_debug_level(&mut self, level: usize) {
+        self.debug_level = level;
+    }
 
     pub fn cluster(&mut self, mindist: f64, nb_cluster: usize) {
         // construct space
@@ -301,6 +308,10 @@ where
         let mut space = Space::new(dim, xmin, xmax, mindist);
         let mut spacemesh = SpaceMesh::new(&mut space, points_to_cluster);
         spacemesh.embed();
+
+        if self.debug_level > 0 {
+            spacemesh.dump_layer(0, self.debug_level);
+        }
         //
         spacemesh.summary();
 
@@ -371,15 +382,15 @@ mod tests {
         log::info!("in test_cluster_random");
         // points are generated around 5 centers/labels
         let nbvec = 100usize;
-        let dim = 5;
+        let dim = 2;
         let width: f64 = 1.;
-        let mindist = 1.;
+        let mindist = 5.;
         let unif_01 = Uniform::<f64>::new(0., width).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         let mut points: Vec<Point<f64>> = Vec::with_capacity(nbvec);
         for i in 0..nbvec {
             let label = i % 5;
-            let offset = (1 + label) as f64 * 15.;
+            let offset = label as f64 * 15.;
             let p: Vec<f64> = (0..dim)
                 .map(|_| offset + unif_01.sample(&mut rng))
                 .collect();
@@ -388,6 +399,7 @@ mod tests {
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         //
         let mut hcluster = Hcluster::new(refpoints, None);
+        hcluster.set_debug_level(1);
         hcluster.cluster(mindist, 5);
         //
     } //end of test_cluster_random

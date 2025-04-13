@@ -44,6 +44,8 @@ pub struct Space {
     width: f64,
     // smallest coordinate
     xmin: f64,
+    // to strictly enclose all data we go from xmin * (1. - margin) to xmax * (1. +  margin)
+    margin: f64,
     // minimum distance we want to discriminate
     mindist: f64,
     //
@@ -55,6 +57,9 @@ impl Space {
     /// -
     ///
     pub fn new(dim: usize, xmin: f64, xmax: f64, mindist: f64) -> Self {
+        // to ensure all data points are internal to the mesh
+        let margin = 1.0E-2;
+        //
         let width = xmax - xmin;
         assert!(
             mindist > 0.,
@@ -85,21 +90,32 @@ impl Space {
                     <= 15
             );
         }
+
+        //
         Space {
             dim,
             width: xmax - xmin,
             xmin,
+            margin,
             mindist: accepted_mindist,
             nb_layer,
         }
     }
 
+    pub(crate) fn get_margin(&self) -> f64 {
+        self.margin
+    }
     /// return space dimension
     pub fn get_dim(&self) -> usize {
         self.dim
     }
-    /// return space width
-    pub fn get_width(&self) -> f64 {
+
+    /// return space width (larger than data width by 1 + margin)
+    pub fn get_mesh_width(&self) -> f64 {
+        self.width * (1. + self.margin)
+    }
+
+    pub fn get_data_width(&self) -> f64 {
         self.width
     }
 
@@ -108,12 +124,17 @@ impl Space {
         self.xmin
     }
 
+    pub fn get_origin(&self) -> f64 {
+        self.xmin * (1. - self.margin)
+    }
+
     pub fn dump(&self) {
         log::info!("dim : {}", self.dim);
         log::info!(
-            "xmin : {:.2e}, xmax : {:.2e}",
+            "xmin : {:.2e}, xmax : {:.2e}, margin : {:.2e}",
             self.xmin,
-            self.xmin + self.width
+            self.xmin + self.width,
+            self.get_margin()
         );
         log::info!(
             "nb layer : {}, mindist : {:.2e}",
@@ -248,12 +269,13 @@ where
     // given layer and index in mesh, returns cooridnates of center of mesh in space
     // at upper layer cell width is space width divided by 2 and so on
     fn get_cell_center(&self) -> Vec<f64> {
-        let exponent: u32 = (self.space.nb_layer - self.layer as usize)
+        let exponent: u32 = (self.space.nb_layer - 1 - self.layer as usize)
             .try_into()
             .unwrap();
         let cell_width = self.space.width / (2u32.pow(exponent) as f64);
+        let origin = self.space.get_origin();
         let position: Vec<f64> = (0..self.space.dim)
-            .map(|i| 0.5 * cell_width + self.index[i] as f64 * cell_width)
+            .map(|i| origin + 0.5 * cell_width + self.index[i] as f64 * cell_width)
             .collect();
         //
         position
@@ -319,7 +341,7 @@ where
 pub(crate) struct Layer<'a, T> {
     // my layer
     layer: u16,
-    //
+    // cell diameter at this layer
     cell_diameter: f64,
     // hashmap to index in nodes
     hcells: DashMap<Vec<u16>, Cell<'a, T>>,
@@ -388,7 +410,7 @@ where
         self.hcells.len()
     }
 
-    fn get_diameter(&self) -> f64 {
+    pub(crate) fn get_diameter(&self) -> f64 {
         self.cell_diameter
     }
 
@@ -402,6 +424,27 @@ where
             .iter()
             .fold(0, |acc, entryref| acc + entryref.value().get_nb_points());
         nbpoints
+    }
+
+    // dump cells in layer. If level >= 1 dump points of each cell
+    // debugging purposes
+    pub(crate) fn dump(&self, level: usize) {
+        log::info!(
+            "\n dumping of layer {}, nbcells : {}",
+            self.layer,
+            self.get_nb_cells()
+        );
+        for (rank, item) in self.hcells.iter().enumerate() {
+            log::info!("idx : {:?}", item.key());
+            let cell = item.value();
+            log::info!("cell rank : {}, nb points : {}", rank, cell.get_nb_points());
+            if level >= 1 {
+                let points = cell.get_points().unwrap();
+                for p in points.iter() {
+                    log::info!("p : {:?}", p.get_position());
+                }
+            }
+        }
     }
 } // end implementation Layer
 
@@ -473,8 +516,6 @@ pub struct SpaceMesh<'a, T: Float> {
     space: &'a Space,
     // leaves are at 0, root node will be above layer_max (at fictitious level nb_layers)
     layer_max: u16,
-    //
-    global_cell: Option<Cell<'a, T>>,
     // layers are stored in vector according to their layer num
     layers: Vec<Layer<'a, T>>,
     //
@@ -503,10 +544,10 @@ where
             recommended_nb_layer
         );
         //
-        let layer_max_u: usize = ((space.get_dim() as f64).sqrt() * space.get_width()
-            / space.mindist)
-            .log2()
-            .trunc() as usize;
+        let layer_max_u: usize = 1
+            + ((space.get_dim() as f64).sqrt() * space.get_mesh_width() / space.mindist)
+                .log2()
+                .trunc() as usize;
         let nb_layer = layer_max_u + 1;
         log::info!(
             "depending on mindist  : {:.2e} nb layer recommended : {}",
@@ -517,14 +558,14 @@ where
             log::warn!("perhaps increase mindist to reduce nb_layer");
         }
         let layer_max_scale: u16 = layer_max_u.try_into().unwrap();
-        let layer_max = (layer_max_scale + recommended_nb_layer) / 2;
+        let layer_max = 1 + (layer_max_scale + recommended_nb_layer) / 2;
         let nb_layer = layer_max + 1;
-        space.mindist =
-            (space.get_dim() as f64).sqrt() * space.get_width() / 2i32.pow(nb_layer as u32) as f64;
+        space.mindist = (space.get_dim() as f64).sqrt() * space.get_mesh_width()
+            / 2i32.pow(nb_layer as u32 - 1) as f64;
         space.nb_layer = nb_layer as usize;
         //
         log::info!(
-            "******************************************* \n setting nb layer to {}, mindist : {:.3e}\n",
+            "\n ******************************************* \n setting nb layer to {}, min cell diamter : {:.3e}\n",
             nb_layer,
             space.mindist
         );
@@ -534,7 +575,6 @@ where
         SpaceMesh {
             space,
             layer_max,
-            global_cell: None,
             layers,
             points: Some(points),
         }
@@ -551,7 +591,7 @@ where
     }
     /// return space width
     pub fn get_width(&self) -> f64 {
-        self.space.get_width()
+        self.space.get_mesh_width()
     }
 
     pub fn get_nb_points(&self) -> usize {
@@ -652,8 +692,9 @@ where
     pub fn get_layer_cell_diameter(&self, layer: u16) -> f64 {
         assert!(layer <= self.layer_max);
         //
-        let cell_diameter: f64 = (self.space.get_width() * (self.space.get_dim() as f64).sqrt())
-            / 2_u32.pow((self.layer_max + 1 - layer) as u32) as f64;
+        let cell_diameter: f64 = (self.space.get_mesh_width()
+            * (self.space.get_dim() as f64).sqrt())
+            / 2_u32.pow((self.layer_max - layer) as u32) as f64;
         cell_diameter
     }
 
@@ -674,10 +715,12 @@ where
         // initialize root cell
         let center = vec![0u16; self.get_dim()];
         // root cell, it is declared above maximum layer as it is isolated...
-        let mut global_cell = Cell::<T>::new(self.space, self.get_layer_max() + 1, center);
+        let mut global_cell = Cell::<T>::new(self.space, self.get_layer_max(), center.clone());
         global_cell.init_points(&self.points.as_ref().unwrap().clone());
-        self.global_cell = Some(global_cell);
-
+        let upper_layer: &Layer<'a, T> = &self.layers[self.get_layer_max() as usize];
+        upper_layer.insert_cells(vec![global_cell]);
+        /*
+        let global_cell = upper_layer.get_cell(&center).unwrap();
         // now to first layer (2^dim  cells at most)
         let cells_first_res = self.global_cell.as_ref().unwrap().split();
         if cells_first_res.is_none() {
@@ -687,10 +730,11 @@ where
         let cells_first = cells_first_res.unwrap();
         log::info!("global cell split in nb cells {}", cells_first.len());
         // initialize first layer (layer max)
-        let upper_layer = &self.layers[self.get_layer_max() as usize];
+        let upper_layer: &Layer<'a, T> = &self.layers[self.get_layer_max() as usize];
         // note a cell is stored in layers only it is allocated beccause it contains points
         upper_layer.insert_cells(cells_first);
         assert!(upper_layer.get_nb_cells() > 0);
+        */
         // now we can propagate layer downward, cells can be treated // using par_iter_mut
         for l in (1..self.get_nb_layers()).rev() {
             log::info!("splitting layer : l : {}", l);
@@ -725,7 +769,7 @@ where
             let cell0 = layer.get_hcells().iter().nth(0).unwrap();
             let cell0_idx = cell0.get_cell_index();
             let cell0_center = cell0.get_cell_center();
-            log::info!("layer : {}", l);
+            log::info!("layer : {}, cell diameter {:?}", l, layer.get_diameter());
             log::info!("index of first (in iterator) cell : {:?}", cell0_idx);
             log::info!("coordinates of first cell : {:?}", cell0_center);
         }
@@ -741,6 +785,10 @@ where
         //
     } // end of embed
 
+    #[allow(unused)]
+    pub(crate) fn dump_layer(&self, layer: usize, level: usize) {
+        self.layers[layer].dump(level);
+    }
     /// gives a summary: number of cells by layer etc
     pub fn summary(&mut self) {
         //
@@ -917,7 +965,12 @@ where
                         );
                         panic!();
                     }
-                    log::debug!("point {:?} inserted in cluster {}", point.get_id(), i);
+                    log::debug!(
+                        "point {:?} x... = {:?}  inserted in cluster {}",
+                        point.get_id(),
+                        point.get_position(),
+                        i
+                    );
                     if log::log_enabled!(log::Level::Debug) && clusters.len() % 10 == 0 {
                         log::debug!("nb points dispacthed to clusters : {}", clusters.len());
                     }
@@ -1003,7 +1056,6 @@ where
 
 //===========================
 
-// TODO: should add shift margin
 // space must enclose points
 #[allow(unused)]
 fn check_space<T: Float + Debug>(space: &Space, points: &[Point<T>]) {
@@ -1013,7 +1065,7 @@ fn check_space<T: Float + Debug>(space: &Space, points: &[Point<T>]) {
     let mut min_xi: T = T::max_value();
     for (ipt, pt) in points.iter().enumerate() {
         for (i, xi) in pt.get_position().iter().enumerate() {
-            if space.get_xmin() >= <f64 as num_traits::NumCast>::from(*xi).unwrap() {
+            if space.get_xmin() > <f64 as num_traits::NumCast>::from(*xi).unwrap() {
                 log::error!(
                     "space.get_xmin() too high,  point of rank {} has coordinate i : {}, xi = {:?} ",
                     ipt,
@@ -1028,7 +1080,7 @@ fn check_space<T: Float + Debug>(space: &Space, points: &[Point<T>]) {
     }
     let delta = max_xi - min_xi;
     //
-    log::error!(
+    log::debug!(
         "minimum space, xmin : {:.3e}, width : {:.3e}",
         <f64 as num_traits::NumCast>::from(min_xi).unwrap(),
         <f64 as num_traits::NumCast>::from(delta).unwrap()
