@@ -441,7 +441,7 @@ where
             if level >= 1 {
                 let points = cell.get_points().unwrap();
                 for p in points.iter() {
-                    log::info!("p : {:?}", p.get_position());
+                    log::trace!("p : {:?}", p.get_position());
                 }
             }
         }
@@ -806,10 +806,107 @@ where
                 self.layers[l].count_points()
             );
         }
+    } // compute benefits by points (in fact cells at layer 0) and layer (See algo 2 of paper and lemma 3.4)
+
+    //
+    pub(crate) fn compute_benefits(&self, version: usize) -> Vec<BenefitUnit> {
+        match version {
+            1 => self.compute_benefits_1(),
+            2 => self.compute_benefits_2(),
+            _ => {
+                panic!("version must be 1  or 2, got {}", version);
+            }
+        }
     }
 
+    //
+
+    pub(crate) fn compute_benefits_1(&self) -> Vec<BenefitUnit> {
+        //
+        log::info!("in compute_benefits");
+        let cpu_start = ProcessTime::now();
+        let sys_now = SystemTime::now();
+        //
+        let nb_layers = self.get_nb_layers();
+        // for each cell we store potential merge benefit at each level!
+        //
+        // iterate over layer 0 and upper_layers store cost and then sort benefit array in decreasing order!
+        // each cell above layer0 store the maximum BenefitUnit observed at its layer
+        let mut best_cell0_contribution = HashMap::<(Vec<u16>, u16), BenefitUnit>::new();
+        let layer0 = self.get_layer(0);
+        for cell in layer0.get_hcells().iter() {
+            let mut benefit_at_layer = Vec::<usize>::with_capacity(nb_layers);
+            let mut previous_tree_size: usize = cell.get_subtree_size();
+            for l in 1..self.get_nb_layers() {
+                let upper_index = cell.get_upper_cell_index_at_layer(l as u16);
+                let upper_cell = self.get_layer(l as u16).get_cell(&upper_index).unwrap();
+                // we can unroll benefit computation ( and layer 0 give no benefit)
+                let benefit = 2usize.pow(l as u32) * previous_tree_size
+                    + benefit_at_layer.last().unwrap_or(&0);
+                let key = (upper_index, l as u16);
+                if let Some(old_best) = best_cell0_contribution.get_mut(&key) {
+                    if benefit > old_best.get_benefit() {
+                        // we found a cell at layer 0 that has better benefit at this level of tree
+                        *(old_best) = BenefitUnit::new(cell.key().clone(), l as u16, benefit);
+                    }
+                } else {
+                    best_cell0_contribution
+                        .insert(key, BenefitUnit::new(cell.key().clone(), l as u16, benefit));
+                }
+                // loop update
+                previous_tree_size = upper_cell.get_subtree_size();
+                benefit_at_layer.push(benefit);
+            }
+        }
+        // now we collect for each cell at layer 0 the highest level layer > 0 at which it is the best contribution
+        // TODO: the loop should be made //
+        let mut higher_best_cell0_contribution = HashMap::<Vec<u16>, BenefitUnit>::new();
+        for cell in layer0.get_hcells().iter() {
+            let mut best_unit: Option<&BenefitUnit> = None;
+            for l in 1..self.get_nb_layers() {
+                let upper_index = cell.get_upper_cell_index_at_layer(l as u16);
+                // is this cell the best at upper_index ?
+                let key = (upper_index, l as u16);
+                if let Some(unit) = best_cell0_contribution.get(&key) {
+                    let (idx, level) = unit.get_id();
+                    assert_eq!(level, l as u16);
+                    if idx == cell.get_cell_index() {
+                        best_unit = Some(unit);
+                    }
+                }
+            }
+            if best_unit.is_some() {
+                higher_best_cell0_contribution
+                    .insert(cell.get_cell_index().to_vec(), best_unit.unwrap().clone());
+            }
+        }
+        // We have now among the list of layer 0 cells that have maximum benefits, the upper layers of their contribution
+        // sort benefits in decreasing (!) order
+        // We can transfert to a Vec<BenefitUit> as BenefitUnit stores cell0 index
+        log::info!("sorting benefits");
+        let mut benefits: Vec<BenefitUnit> = higher_best_cell0_contribution.into_values().collect();
+        benefits.par_sort_unstable_by(|unita, unitb| {
+            unitb.benefit.partial_cmp(&unita.benefit).unwrap()
+        });
+        //
+        log::info!("benefits vector size : {}", benefits.len());
+        assert!(benefits[0].benefit >= benefits[1].benefit);
+        //
+        log::info!("exiting compute_benefits");
+        let cpu_time: Duration = cpu_start.elapsed();
+        println!(
+            " compute_benefits sys time(s) {:?} cpu time {:?}",
+            sys_now.elapsed().unwrap().as_secs(),
+            cpu_time.as_secs()
+        );
+        //
+        benefits
+    } // end of compute_benefits_1
+
+    //
+
     // compute benefits by points (in fact cells at layer 0) and layer (See algo 2 of paper and lemma 3.4)
-    pub(crate) fn compute_benefits(&self) -> Vec<BenefitUnit> {
+    pub(crate) fn compute_benefits_2(&self) -> Vec<BenefitUnit> {
         //
         log::info!("in compute_benefits");
         let cpu_start = ProcessTime::now();
@@ -895,74 +992,7 @@ where
         benefits.par_sort_unstable_by(|unita, unitb| {
             unitb.benefit.partial_cmp(&unita.benefit).unwrap()
         });
-        //
-        //
-        // iterate over layer 0 and upper_layers store cost and then sort benefit array in decreasing order!
-        // each cell above layer0 store the maximum BenefitUnit observed at its layer
-        /*
-        let mut best_cell0_contribution = HashMap::<(Vec<u16>, u16), BenefitUnit>::new();
-        let layer0 = self.get_layer(0);
-        for cell in layer0.get_hcells().iter() {
-            let benefit_at_layer = all_benefits.get(cell.get_cell_index()).unwrap();
-            let mut previous_tree_size: usize = cell.get_subtree_size();
-            for l in 1..self.get_nb_layers() {
-                let upper_index = cell.get_upper_cell_index_at_layer(l as u16);
-                let upper_cell = self.get_layer(l as u16).get_cell(&upper_index).unwrap();
-                // we can unroll benefit computation ( and layer 0 give no benefit)
-                let benefit = benefit_at_layer[l];
-                let key = (upper_index, l as u16);
-                if let Some(old_best) = best_cell0_contribution.get_mut(&key) {
-                    if benefit > old_best.get_benefit() {
-                        // we found a cell at layer 0 that has better benefit at this level of tree
-                        *(old_best) = BenefitUnit::new(cell.key().clone(), l as u16, benefit);
-                    }
-                } else {
-                    best_cell0_contribution
-                        .insert(key, BenefitUnit::new(cell.key().clone(), l as u16, benefit));
-                }
-                // loop update
-                previous_tree_size = upper_cell.get_subtree_size();
-                benefit_at_layer.push(benefit);
-            }
-        }
-        */
-        /*
-        // now we collect for each cell at layer 0 the highest level layer > 0 at which it is the best contribution
-        // TODO: the loop should be made //
-        let mut higher_best_cell0_contribution = HashMap::<Vec<u16>, BenefitUnit>::new();
-        for cell in layer0.get_hcells().iter() {
-            let mut best_unit: Option<&BenefitUnit> = None;
-            for l in 1..self.get_nb_layers() {
-                let upper_index = cell.get_upper_cell_index_at_layer(l as u16);
-                // is this cell the best at upper_index ?
-                let key = (upper_index, l as u16);
-                if let Some(unit) = best_cell0_contribution.get(&key) {
-                    let (idx, level) = unit.get_id();
-                    assert_eq!(level, l as u16);
-                    if idx == cell.get_cell_index() {
-                        best_unit = Some(unit);
-                    }
-                }
-            }
-            if best_unit.is_some() {
-                higher_best_cell0_contribution
-                    .insert(cell.get_cell_index().to_vec(), best_unit.unwrap().clone());
-            }
-        }
 
-        // We have now among the list of layer 0 cells that have maximum benefits, the upper layers of their contribution
-        // sort benefits in decreasing (!) order
-        // We can transfert to a Vec<BenefitUit> as BenefitUnit stores cell0 index
-        log::info!("sorting benefits");
-        let mut benefits: Vec<BenefitUnit> = higher_best_cell0_contribution.into_values().collect();
-        benefits.par_sort_unstable_by(|unita, unitb| {
-            unitb.benefit.partial_cmp(&unita.benefit).unwrap()
-        });
-
-        //
-        log::info!("benefits vector size : {}", benefits.len());
-        assert!(benefits[0].benefit >= benefits[1].benefit);
-        */
         //
         log::info!("exiting compute_benefits");
         let cpu_time: Duration = cpu_start.elapsed();
@@ -973,7 +1003,7 @@ where
         );
         //
         benefits
-    } // end of compute_benefits
+    } // end of compute_benefits_2
 
     #[allow(unused)]
     pub(crate) fn get_partition(
@@ -1049,7 +1079,7 @@ where
                         );
                         panic!();
                     }
-                    log::debug!(
+                    log::trace!(
                         "point {:?} x... = {:?}  inserted in cluster {}",
                         point.get_id(),
                         point.get_position(),
@@ -1109,11 +1139,11 @@ where
     T: Float + Debug + Sync,
 {
     for unit in benefits {
-        log::info!("\n {:?}", unit);
+        log::debug!("\n {:?}", unit);
         let cell_idx0 = unit.get_cell_idx();
         let cell = spacemesh.get_cell(cell_idx0, 0).unwrap();
         let center = spacemesh.get_cell_center(&cell_idx0, 0).unwrap();
-        log::info!(
+        log::debug!(
             "cell center : {:?} nb point : {}",
             center,
             cell.get_nb_points()
@@ -1122,7 +1152,7 @@ where
 }
 
 // we check we have a partition
-pub(crate) fn check_partition<T>(spacemesh: &SpaceMesh<T>, benefits: &Vec<BenefitUnit>)
+pub(crate) fn check_benefits_cover<T>(spacemesh: &SpaceMesh<T>, benefits: &Vec<BenefitUnit>)
 where
     T: Float + Debug + Sync,
 {
@@ -1215,7 +1245,7 @@ mod tests {
         //
         mesh.compute_subtree_size();
         //
-        let _benefits = mesh.compute_benefits();
+        let _benefits = mesh.compute_benefits(1);
     } //end of test_uniform_random
 
     #[test]
@@ -1275,7 +1305,7 @@ mod tests {
         mesh.embed();
         mesh.summary();
         //
-        let _benefits = mesh.compute_benefits();
+        let _benefits = mesh.compute_benefits(1);
         // check number of points for cell at origin
         log::info!("number of points at orgin 0.001 .... 0.001]");
         let p = vec![0.001; dim];

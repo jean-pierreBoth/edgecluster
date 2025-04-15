@@ -4,9 +4,10 @@
 
 use cpu_time::ProcessTime;
 use rand_distr::{Distribution, StandardNormal};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use lax::Lapack;
+use std::collections::HashMap;
 // use ndarray_rand::rand_distr::{Distribution, StandardNormal};
 
 // points are assimilated to cells of layer 0. Most cells of layer 0 should have one or very few points.
@@ -16,6 +17,31 @@ use num_traits::Float;
 use super::point::*;
 use super::rhst2::*;
 use crate::smalld::*;
+
+//===========================
+
+pub struct ClusterResult {
+    /// a map from  points id to a cluster num
+    map: HashMap<usize, u32>,
+    /// for each cluster a vector of point id affected to it
+    clusters: Vec<Vec<usize>>,
+}
+
+impl ClusterResult {
+    pub(crate) fn new(map: HashMap<usize, u32>, clusters: Vec<Vec<usize>>) -> ClusterResult {
+        ClusterResult { map, clusters }
+    }
+
+    /// return a map from  points id to a cluster num
+    pub fn get_map(&self) -> &HashMap<usize, u32> {
+        &self.map
+    }
+
+    /// for each cluster a vector of point id affected to it
+    pub fn get_clusters(&self) -> &Vec<Vec<usize>> {
+        &self.clusters
+    }
+}
 
 //==========================
 
@@ -78,7 +104,11 @@ where
         self.debug_level = level;
     }
 
-    pub fn cluster(&mut self, mindist: f64, nb_cluster: usize) {
+    /// The function returns a map giving for each point id its cluster
+    pub fn cluster(&mut self, mindist: f64, nb_cluster: usize) -> ClusterResult {
+        //
+        let cpu_start = ProcessTime::now();
+        let sys_now = SystemTime::now();
         // construct space
         self.mindist = mindist;
         let (xmin, xmax) = self
@@ -132,20 +162,28 @@ where
         //
         spacemesh.summary();
 
-        let filtered_benefits = spacemesh.compute_benefits();
-        /*         // now we extract best subtrees from benefits in mesh
-        let mut best_tree = BestTree::new(spacemesh.get_nb_layers(), &spacemesh);
-        best_tree.get_benefits(&benefits);
-
-        let filtered_benefits = best_tree.get_filtered_benefits(); */
-
-        log::info!("dump of filtered_benefits");
-        dump_benefits(&spacemesh, &filtered_benefits);
-        check_partition(&spacemesh, &filtered_benefits);
+        let filtered_benefits = spacemesh.compute_benefits(1);
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!("dump of filtered_benefits");
+            dump_benefits(&spacemesh, &filtered_benefits);
+        }
+        check_benefits_cover(&spacemesh, &filtered_benefits);
         //
         // we have benefits, we can try to cluster
         //
-        let _clusters = spacemesh.get_partition(nb_cluster, &filtered_benefits);
+        let cluster_hash = spacemesh.get_partition(nb_cluster, &filtered_benefits);
+        let mut clusters: Vec<Vec<usize>> = (0..nb_cluster).map(|_| Vec::<usize>::new()).collect();
+        for (id, cluster) in cluster_hash.iter() {
+            clusters[*cluster as usize].push(*id);
+        }
+        //
+        println!(
+            " Cluster time(s) {:?} cpu time {:?}",
+            sys_now.elapsed().unwrap().as_secs(),
+            cpu_start.elapsed().as_secs()
+        );
+        //
+        ClusterResult::new(cluster_hash, clusters)
     }
 
     // return a vector of points with reduced data dimension, label and id preserved
@@ -201,7 +239,7 @@ mod tests {
         let nbvec = 100usize;
         let dim = 2;
         let width: f64 = 1.;
-        let mindist = 5.;
+        let mindist = 0.5;
         let unif_01 = Uniform::<f64>::new(0., width).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         let mut points: Vec<Point<f64>> = Vec::with_capacity(nbvec);
@@ -217,7 +255,7 @@ mod tests {
         //
         let mut hcluster = Hcluster::new(refpoints, None);
         hcluster.set_debug_level(1);
-        hcluster.cluster(mindist, 5);
+        hcluster.cluster(mindist, 7);
         //
     } //end of test_cluster_random
 
