@@ -41,7 +41,7 @@ use super::point::*;
 pub struct Space {
     // space dimension
     dim: usize,
-    // max over dimension of (xmax-xmin)
+    // max over dimension of (xmax-xmin). but not mesh width!
     width: f64,
     // smallest coordinate
     xmin: f64,
@@ -273,7 +273,7 @@ where
         let exponent: u32 = (self.space.nb_layer - 1 - self.layer as usize)
             .try_into()
             .unwrap();
-        let cell_width = self.space.width / (2u32.pow(exponent) as f64);
+        let cell_width = self.space.get_mesh_width() / (2u32.pow(exponent) as f64);
         let origin = self.space.get_origin();
         let position: Vec<f64> = (0..self.space.dim)
             .map(|i| origin + 0.5 * cell_width + self.index[i] as f64 * cell_width)
@@ -1033,6 +1033,9 @@ where
                 let mut j = i + 1;
 
                 let found: bool = loop {
+                    if j >= p_size {
+                        break false;
+                    }
                     let unit_j = &benefit_units[j];
                     let (_, layer_j) = unit_j.get_id();
                     let idx_j = unit_j.get_index_at_layer();
