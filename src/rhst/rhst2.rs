@@ -19,6 +19,7 @@ use dashmap::{iter, mapref::one, rayon::*, DashMap};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::sync::atomic::AtomicUsize;
 
 use super::point::*;
 
@@ -719,22 +720,6 @@ where
         global_cell.init_points(&self.points.as_ref().unwrap().clone());
         let upper_layer: &Layer<'a, T> = &self.layers[self.get_layer_max() as usize];
         upper_layer.insert_cells(vec![global_cell]);
-        /*
-        let global_cell = upper_layer.get_cell(&center).unwrap();
-        // now to first layer (2^dim  cells at most)
-        let cells_first_res = self.global_cell.as_ref().unwrap().split();
-        if cells_first_res.is_none() {
-            log::error!("splitting of  global cell failed");
-            panic!();
-        }
-        let cells_first = cells_first_res.unwrap();
-        log::info!("global cell split in nb cells {}", cells_first.len());
-        // initialize first layer (layer max)
-        let upper_layer: &Layer<'a, T> = &self.layers[self.get_layer_max() as usize];
-        // note a cell is stored in layers only it is allocated beccause it contains points
-        upper_layer.insert_cells(cells_first);
-        assert!(upper_layer.get_nb_cells() > 0);
-        */
         // now we can propagate layer downward, cells can be treated // using par_iter_mut
         for l in (1..self.get_nb_layers()).rev() {
             log::info!("splitting layer : l : {}", l);
@@ -778,9 +763,9 @@ where
         log::info!("exiting SpaceMesh::embed");
         let cpu_time: Duration = cpu_start.elapsed();
         println!(
-            " SpaceMesh::embed sys time(s) {:?} cpu time {:?}",
-            sys_now.elapsed().unwrap().as_secs(),
-            cpu_time.as_secs()
+            " SpaceMesh::embed sys time(ms) {:?} cpu time {:?}",
+            sys_now.elapsed().unwrap().as_millis(),
+            cpu_time.as_millis()
         );
         //
     } // end of embed
@@ -895,9 +880,9 @@ where
         log::info!("exiting compute_benefits");
         let cpu_time: Duration = cpu_start.elapsed();
         println!(
-            " compute_benefits sys time(s) {:?} cpu time {:?}",
-            sys_now.elapsed().unwrap().as_secs(),
-            cpu_time.as_secs()
+            " compute_benefits sys time(ms) {:?} cpu time {:?}",
+            sys_now.elapsed().unwrap().as_millis(),
+            cpu_time.as_millis()
         );
         //
         benefits
@@ -997,9 +982,9 @@ where
         log::info!("exiting compute_benefits");
         let cpu_time: Duration = cpu_start.elapsed();
         println!(
-            " compute_benefits sys time(s) {:?} cpu time {:?}",
-            sys_now.elapsed().unwrap().as_secs(),
-            cpu_time.as_secs()
+            " compute_benefits sys time(ms) {:?} cpu time {:?}",
+            sys_now.elapsed().unwrap().as_millis(),
+            cpu_time.as_millis()
         );
         //
         benefits
@@ -1010,15 +995,15 @@ where
         &self,
         p_size: usize,
         benefit_units: &[BenefitUnit],
-    ) -> HashMap<PointId, u32> {
+    ) -> DashMap<PointId, u32> {
         //
         let nb_points = self.get_nb_points();
         log::info!(
-            "dispatching nbpoints: {}, in {} clusters",
+            "in SpaceMesh::get_partiton dispatching nbpoints: {}, in {} clusters",
             nb_points,
             p_size
         );
-        let mut clusters = HashMap::<PointId, u32>::with_capacity(nb_points);
+        let mut clusters = DashMap::<PointId, u32>::with_capacity(nb_points);
         //
         for i in 0..p_size {
             log::info!("benefit unit : {}", i);
@@ -1046,8 +1031,8 @@ where
             );
             let points = unit_cell.get_points().unwrap();
             // what is exclusively in unit i and not in sub-sequent units
-            let mut nbpoint_i = 0;
-            for point in points.iter() {
+            let mut nbpoint_i = AtomicUsize::new(0);
+            points.par_iter().for_each(|point| {
                 let mut j = i + 1;
 
                 let found: bool = loop {
@@ -1089,11 +1074,11 @@ where
                         log::debug!("nb points dispacthed to clusters : {}", clusters.len());
                     }
                 }
-                nbpoint_i += 1;
-                if log::log_enabled!(log::Level::Debug) && nbpoint_i % 10000 == 0 {
-                    log::debug!("nb points dispacthed to clusters : {}", nbpoint_i);
+                let old = nbpoint_i.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if log::log_enabled!(log::Level::Debug) && old % 10000 == 0 {
+                    log::debug!("nb points dispacthed to clusters : {}", old);
                 }
-            }
+            });
         }
         log::info!(
             "points to dispatch : {}, nb points in clusters : {}",

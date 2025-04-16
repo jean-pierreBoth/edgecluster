@@ -6,9 +6,8 @@ use cpu_time::ProcessTime;
 use rand_distr::{Distribution, StandardNormal};
 use std::time::SystemTime;
 
+use dashmap::DashMap;
 use lax::Lapack;
-use std::collections::HashMap;
-// use ndarray_rand::rand_distr::{Distribution, StandardNormal};
 
 // points are assimilated to cells of layer 0. Most cells of layer 0 should have one or very few points.
 // The algorithms is translated
@@ -22,18 +21,18 @@ use crate::smalld::*;
 
 pub struct ClusterResult {
     /// a map from  points id to a cluster num
-    map: HashMap<usize, u32>,
+    map: DashMap<usize, u32>,
     /// for each cluster a vector of point id affected to it
     clusters: Vec<Vec<usize>>,
 }
 
 impl ClusterResult {
-    pub(crate) fn new(map: HashMap<usize, u32>, clusters: Vec<Vec<usize>>) -> ClusterResult {
+    pub(crate) fn new(map: DashMap<usize, u32>, clusters: Vec<Vec<usize>>) -> ClusterResult {
         ClusterResult { map, clusters }
     }
 
     /// return a map from  points id to a cluster num
-    pub fn get_map(&self) -> &HashMap<usize, u32> {
+    pub fn get_map(&self) -> &DashMap<usize, u32> {
         &self.map
     }
 
@@ -173,8 +172,8 @@ where
         //
         let cluster_hash = spacemesh.get_partition(nb_cluster, &filtered_benefits);
         let mut clusters: Vec<Vec<usize>> = (0..nb_cluster).map(|_| Vec::<usize>::new()).collect();
-        for (id, cluster) in cluster_hash.iter() {
-            clusters[*cluster as usize].push(*id);
+        for item in cluster_hash.iter() {
+            clusters[*item.value() as usize].push(*item.key());
         }
         //
         println!(
@@ -264,9 +263,9 @@ mod tests {
         log_init_test();
         log::info!("in test_uniform_random");
         //
-        let nbvec = 10_000usize;
+        let nbvec = 10_00_000usize;
         let dim = 5;
-        let width: f64 = 100.;
+        let width: f32 = 100.;
         let mindist = 5.;
 
         // sample with coordinates following exponential law
@@ -274,8 +273,10 @@ mod tests {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         let mut points: Vec<Point<f32>> = Vec::with_capacity(nbvec);
         for i in 0..nbvec {
+            let label = i % 5;
+            let offset = label as f32 * 15. as f32;
             let p: Vec<f32> = (0..dim)
-                .map(|_| law.sample(&mut rng).min(width as f32))
+                .map(|_| offset + law.sample(&mut rng).min(width) as f32)
                 .collect();
             points.push(Point::<f32>::new(i, p, (i % 5).try_into().unwrap()));
         }
