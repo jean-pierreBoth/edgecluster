@@ -1,9 +1,8 @@
 //! implementation of Dimension Reduction based on the following papers:
 //!
-//! - Johnson-Lindenstrauss Transforms with Best Confidence Skorski 2021
-//!     See [skorski](https://proceedings.mlr.press/v134/skorski21a/skorski21a.pdf)
-//! - How to generate random matrices from the classic compact groups Mezzadri 2007
-//!        See [mezzadri](https://arxiv.org/pdf/math-ph/0609050)
+//! - Johnson-Lindenstrauss Transforms with Best Confidence Skorski 2021 See [skorski](https://proceedings.mlr.press/v134/skorski21a/skorski21a.pdf)
+//!
+//! - How to generate random matrices from the classic compact groups Mezzadri 2007 See [mezzadri](https://arxiv.org/pdf/math-ph/0609050)
 
 use num_traits::cast::*;
 use num_traits::float::Float;

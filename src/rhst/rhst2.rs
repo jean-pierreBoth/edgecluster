@@ -218,14 +218,14 @@ where
     // returns true if a point is in sub tree of cell
     pub(crate) fn has_point(&self, pid: PointId) -> bool {
         if self.points_in.is_none() {
-            return false;
+            false
         } else {
             for p in self.points_in.as_ref().unwrap() {
                 if p.get_id() == pid {
                     return true;
                 }
             }
-            return false;
+            false
         }
     }
     // get parent cell in splitting process
@@ -860,9 +860,9 @@ where
                     }
                 }
             }
-            if best_unit.is_some() {
+            if let Some(b_unit) = best_unit {
                 higher_best_cell0_contribution
-                    .insert(cell.get_cell_index().to_vec(), best_unit.unwrap().clone());
+                    .insert(cell.get_cell_index().to_vec(), b_unit.clone());
             }
         }
         // We have now among the list of layer 0 cells that have maximum benefits, the upper layers of their contribution
@@ -1042,12 +1042,10 @@ where
                     let ref_cell_j = self.get_cell(&idx_j, layer_j).unwrap();
                     if ref_cell_j.has_point(point.get_id()) {
                         break true;
+                    } else if j < p_size - 1 {
+                        j += 1;
                     } else {
-                        if j < p_size - 1 {
-                            j = j + 1;
-                        } else {
-                            break false;
-                        }
+                        break false;
                     }
                 };
                 if !found {
@@ -1127,7 +1125,7 @@ where
         log::debug!("\n {:?}", unit);
         let cell_idx0 = unit.get_cell_idx();
         let cell = spacemesh.get_cell(cell_idx0, 0).unwrap();
-        let center = spacemesh.get_cell_center(&cell_idx0, 0).unwrap();
+        let center = spacemesh.get_cell_center(cell_idx0, 0).unwrap();
         log::debug!(
             "cell center : {:?} nb point : {}",
             center,

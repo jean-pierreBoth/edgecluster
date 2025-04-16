@@ -63,7 +63,7 @@ impl ClusterResult {
             .collect();
         //
         for item in self.map.iter() {
-            let point = &points[*item.key()];
+            let point = points[*item.key()];
             let xyz = point.get_position();
             for d in 0..dim {
                 centers[*item.value() as usize][d] += xyz[d]
@@ -77,6 +77,26 @@ impl ClusterResult {
         }
         //
         centers
+    }
+
+    pub fn compute_cost<T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign>(
+        &self,
+        points: &[&Point<T>],
+    ) -> T {
+        let centers = self.compute_cluster_center(points);
+        let mut norm = T::zero();
+        for item in self.map.iter() {
+            let point = points[*item.key()];
+            let xyz = point.get_position();
+            let key = point.get_id();
+            let cluster = *self.map.get(&key).unwrap().value();
+            norm += xyz
+                .iter()
+                .zip(&centers[cluster as usize])
+                .fold(T::zero(), |acc, (p, c)| (acc + (*p - *c) * (*p - *c)));
+        }
+        norm /= T::from(points.len()).unwrap();
+        norm.sqrt()
     }
 } // end of impl ClusterResult
 
@@ -159,7 +179,7 @@ where
             .iter()
             .map(|p| p.get_minmax())
             .fold((T::max_value(), T::min_value()), |acc, x| {
-                (acc.0.min(x.0), acc.0.max(x.1))
+                (acc.0.min(x.0), acc.1.max(x.1))
             });
         //
         let xmin: f64 = xmin.to_f64().unwrap();
@@ -187,7 +207,7 @@ where
             .iter()
             .map(|p| p.get_minmax())
             .fold((T::max_value(), T::min_value()), |acc, x| {
-                (acc.0.min(x.0), acc.0.max(x.1))
+                (acc.0.min(x.0), acc.1.max(x.1))
             });
         //
         let xmin: f64 = xmin.to_f64().unwrap();
@@ -279,7 +299,7 @@ mod tests {
         log_init_test();
         log::info!("in test_cluster_random");
         // points are generated around 5 centers/labels
-        let nbvec = 100usize;
+        let nbvec = 1_00_000usize;
         let dim = 2;
         let width: f64 = 1.;
         let mindist = 0.5;
@@ -298,7 +318,7 @@ mod tests {
         //
         let mut hcluster = Hcluster::new(refpoints, None);
         hcluster.set_debug_level(1);
-        let res = hcluster.cluster(mindist, 7);
+        let res = hcluster.cluster(mindist, 10);
         //
         let refpoints = hcluster.get_points();
         let centers = res.compute_cluster_center(&refpoints);
@@ -310,6 +330,7 @@ mod tests {
                 c
             );
         }
+        println!("global cost : {:.3e}", res.compute_cost(&refpoints));
     } //end of test_cluster_random
 
     #[test]
@@ -350,6 +371,7 @@ mod tests {
                 c
             );
         }
+        println!("global cost : {:.3e}", res.compute_cost(&refpoints));
         //
     } //end of test_cluster_exp
 } // end of tests
