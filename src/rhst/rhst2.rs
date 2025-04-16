@@ -808,7 +808,7 @@ where
 
     pub(crate) fn compute_benefits_1(&self) -> Vec<BenefitUnit> {
         //
-        log::info!("in compute_benefits");
+        log::info!("in compute_benefits_1");
         let cpu_start = ProcessTime::now();
         let sys_now = SystemTime::now();
         //
@@ -893,7 +893,7 @@ where
     // compute benefits by points (in fact cells at layer 0) and layer (See algo 2 of paper and lemma 3.4)
     pub(crate) fn compute_benefits_2(&self) -> Vec<BenefitUnit> {
         //
-        log::info!("in compute_benefits");
+        log::info!("in compute_benefits_2");
         let cpu_start = ProcessTime::now();
         let sys_now = SystemTime::now();
         //
@@ -963,10 +963,6 @@ where
                 best_cell0_higher_l.insert(bc0.0, (bc0.1, bc0.2));
             }
         }
-        log::info!(
-            "\n\n dump of best bc0 at higher l : {}",
-            best_cell0_higher_l.len()
-        );
         // we can collect BenefitUnit and sort them
         let mut benefits = Vec::<BenefitUnit>::with_capacity(best_cell0_higher_l.len());
         for bc0_l in best_cell0_higher_l {
@@ -977,6 +973,7 @@ where
         benefits.par_sort_unstable_by(|unita, unitb| {
             unitb.benefit.partial_cmp(&unita.benefit).unwrap()
         });
+        log::info!("benefits vector size : {}", benefits.len());
 
         //
         log::info!("exiting compute_benefits");

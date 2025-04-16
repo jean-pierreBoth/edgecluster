@@ -40,7 +40,45 @@ impl ClusterResult {
     pub fn get_clusters(&self) -> &Vec<Vec<usize>> {
         &self.clusters
     }
-}
+
+    pub fn dump_cluster_size(&self) {
+        for (rank, v) in self.clusters.iter().enumerate() {
+            println!("cluster : {} , size : {}", rank, v.len());
+        }
+    }
+
+    pub fn get_cluster_size(&self, i: usize) -> usize {
+        self.clusters[i].len()
+    }
+
+    pub fn compute_cluster_center<
+        T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign,
+    >(
+        &self,
+        points: &[&Point<T>],
+    ) -> Vec<Vec<T>> {
+        let dim = points[0].get_dimension();
+        let mut centers: Vec<Vec<T>> = (0..self.clusters.len())
+            .map(|_| vec![T::zero(); dim])
+            .collect();
+        //
+        for item in self.map.iter() {
+            let point = &points[*item.key()];
+            let xyz = point.get_position();
+            for d in 0..dim {
+                centers[*item.value() as usize][d] += xyz[d]
+            }
+        }
+        // renormalize
+        for (cluster, point) in &mut centers.iter_mut().enumerate() {
+            for x in point {
+                *x /= T::from(self.clusters[cluster].len()).unwrap();
+            }
+        }
+        //
+        centers
+    }
+} // end of impl ClusterResult
 
 //==========================
 
@@ -103,6 +141,12 @@ where
         self.debug_level = level;
     }
 
+    /// returns references to points
+    pub fn get_points(&self) -> &Vec<&'a Point<T>> {
+        &self.points
+    }
+
+    //
     /// The function returns a map giving for each point id its cluster
     pub fn cluster(&mut self, mindist: f64, nb_cluster: usize) -> ClusterResult {
         //
@@ -254,8 +298,18 @@ mod tests {
         //
         let mut hcluster = Hcluster::new(refpoints, None);
         hcluster.set_debug_level(1);
-        hcluster.cluster(mindist, 7);
+        let res = hcluster.cluster(mindist, 7);
         //
+        let refpoints = hcluster.get_points();
+        let centers = res.compute_cluster_center(&refpoints);
+        for (i, c) in centers.iter().enumerate() {
+            println!(
+                "center cluster : {},  size : {}, center : {:?}",
+                i,
+                res.get_cluster_size(i),
+                c
+            );
+        }
     } //end of test_cluster_random
 
     #[test]
@@ -266,7 +320,7 @@ mod tests {
         let nbvec = 10_00_000usize;
         let dim = 5;
         let width: f32 = 100.;
-        let mindist = 5.;
+        let mindist = 1.;
 
         // sample with coordinates following exponential law
         let law = Exp::<f32>::new(50. / width as f32).unwrap();
@@ -284,7 +338,18 @@ mod tests {
         // Space definition
         //
         let mut hcluster = Hcluster::new(refpoints, None);
-        hcluster.cluster(mindist, 5);
+        let res = hcluster.cluster(mindist, 10);
+        //
+        let refpoints = hcluster.get_points();
+        let centers = res.compute_cluster_center(&refpoints);
+        for (i, c) in centers.iter().enumerate() {
+            println!(
+                "center cluster : {},  size : {}, center : {:?}",
+                i,
+                res.get_cluster_size(i),
+                c
+            );
+        }
         //
     } //end of test_cluster_exp
 } // end of tests
