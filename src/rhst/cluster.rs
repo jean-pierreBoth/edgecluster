@@ -65,8 +65,9 @@ impl ClusterResult {
         for item in self.map.iter() {
             let point = points[*item.key()];
             let xyz = point.get_position();
+            let center = &mut centers[*item.value() as usize];
             for d in 0..dim {
-                centers[*item.value() as usize][d] += xyz[d]
+                center[d] += xyz[d]
             }
         }
         // renormalize
@@ -110,6 +111,8 @@ pub struct Hcluster<'a, T> {
     mindist: f64,
     //
     reducer: Option<&'a dyn reducer::Reducer<T>>,
+    // dimension of reduced points if reduction was used
+    reduced_dim: Option<usize>,
     // if we (must) reduce points dimension,
     reduced_points: Option<Vec<Point<T>>>,
 }
@@ -153,6 +156,7 @@ where
             points,
             mindist: 0.,
             reducer,
+            reduced_dim: None,
             reduced_points: None,
         }
     } // end of new
@@ -166,6 +170,14 @@ where
         &self.points
     }
 
+    /// get reduced dimension if reduced
+    pub fn get_reduced_dim(&self) -> Option<usize> {
+        self.reduced_dim
+    }
+
+    pub fn get_data_dim(&self) -> usize {
+        self.points[0].get_dimension()
+    }
     //
     /// The function returns a map giving for each point id its cluster
     pub fn cluster(&mut self, mindist: f64, nb_cluster: usize) -> ClusterResult {
@@ -188,8 +200,8 @@ where
         log::debug!("dim : {} xmin : {:.3e}, xmax : {:.3e}", dim, xmin, xmax);
         // TODO: do we need to keep points in HCluster (we clone a vec of references)
         let points_to_cluster: Vec<&Point<T>>;
-        if dim > 10 {
-            let to_dim = 10;
+        if dim > self.points.len().ilog(2) as usize {
+            let to_dim = 10.min((self.points.len().ilog(2) as usize) / 4);
             log::info!("reducing dimension from : {} to : {}", dim, to_dim);
             // we reduce dimension
             self.reduced_points = Some(self.reduce_points(to_dim));
@@ -219,7 +231,7 @@ where
         let mut spacemesh = SpaceMesh::new(&mut space, points_to_cluster);
         spacemesh.embed();
 
-        if self.debug_level > 0 {
+        if self.debug_level > 1 {
             spacemesh.dump_layer(0, self.debug_level);
         }
         //
@@ -227,7 +239,10 @@ where
 
         let filtered_benefits = spacemesh.compute_benefits(1);
         if log::log_enabled!(log::Level::Debug) {
-            log::debug!("dump of filtered_benefits");
+            log::debug!(
+                "dump of filtered_benefits, nbunits : {}",
+                filtered_benefits.len()
+            );
             dump_benefits(&spacemesh, &filtered_benefits);
         }
         check_benefits_cover(&spacemesh, &filtered_benefits);

@@ -37,6 +37,31 @@ use super::point::*;
 ///
 /// Nevertheless it requires data to have small/moderated dimension. This can be achieved using a first step of dimension reduction
 /// via random projections or an embedding via the crate [annembed](https://crates.io/crates/annembed)
+///
+///
+
+// given data min max , use margin to define enclosing space
+pub(crate) fn compute_enclosing_bounds(xmin: f64, xmax: f64, margin: f64) -> (f64, f64) {
+    let origin: f64;
+    if xmin > 0. {
+        origin = xmin * (1. - margin);
+    } else if xmin < 0. {
+        origin = xmin * (1. + margin);
+    } else {
+        origin = -margin; // TODO: scale with xmax ?
+    }
+    //
+    let upper: f64;
+    if xmax > 0. {
+        upper = xmax * (1. + margin);
+    } else if xmax < 0. {
+        upper = xmax * (1. - margin);
+    } else {
+        upper = margin;
+    }
+    (origin, upper)
+} // end of compute_enclosing_bounds
+
 #[derive(Debug, Copy, Clone)]
 pub struct Space {
     // space dimension
@@ -47,6 +72,10 @@ pub struct Space {
     xmin: f64,
     // to strictly enclose all data we go from xmin * (1. - margin) to xmax * (1. +  margin)
     margin: f64,
+    // minimum space coordinate
+    origin: f64,
+    // maximum space coordinate
+    upper: f64,
     // minimum distance we want to discriminate
     mindist: f64,
     //
@@ -91,13 +120,16 @@ impl Space {
                     <= 15
             );
         }
-
+        let (origin, upper) = compute_enclosing_bounds(xmin, xmax, margin);
+        log::info!("mesh min : {:.3e}, mesh max : {:.3e}", origin, upper);
         //
         Space {
             dim,
             width: xmax - xmin,
             xmin,
             margin,
+            origin,
+            upper,
             mindist: accepted_mindist,
             nb_layer,
         }
@@ -113,7 +145,7 @@ impl Space {
 
     /// return space width (larger than data width by 1 + margin)
     pub fn get_mesh_width(&self) -> f64 {
-        self.width * (1. + self.margin)
+        self.upper - self.origin
     }
 
     pub fn get_data_width(&self) -> f64 {
@@ -168,7 +200,7 @@ pub(crate) struct Cell<'a, T> {
 
 impl<'a, T> Cell<'a, T>
 where
-    T: Float + Debug,
+    T: Float + Debug + std::fmt::LowerExp,
 {
     pub fn new(space: &'a Space, layer: u16, index: Vec<u16>) -> Self {
         assert!((layer as usize) <= space.nb_layer);
@@ -350,7 +382,7 @@ pub(crate) struct Layer<'a, T> {
 
 impl<'a, T> Layer<'a, T>
 where
-    T: Float + Debug + Sync,
+    T: Float + Debug + std::fmt::LowerExp + Sync,
 {
     //
     fn new(layer: u16, cell_diameter: f64) -> Self {
@@ -525,7 +557,7 @@ pub struct SpaceMesh<'a, T: Float> {
 
 impl<'a, T> SpaceMesh<'a, T>
 where
-    T: Float + Debug + Sync,
+    T: Float + Debug + std::fmt::LowerExp + Sync,
 {
     /// define Space.
     /// - data points to cluster
@@ -754,9 +786,21 @@ where
             let cell0 = layer.get_hcells().iter().nth(0).unwrap();
             let cell0_idx = cell0.get_cell_index();
             let cell0_center = cell0.get_cell_center();
-            log::info!("layer : {}, cell diameter {:?}", l, layer.get_diameter());
+            assert!(cell0_center.len() > 0);
+            log::info!(
+                "\n layer : {}, cell diameter {:.3e}",
+                l,
+                layer.get_diameter()
+            );
             log::info!("index of first (in iterator) cell : {:?}", cell0_idx);
-            log::info!("coordinates of first cell : {:?}", cell0_center);
+            if cell0_center.len() <= 20 || log::log_enabled!(log::Level::Debug) {
+                log::info!("coordinates of first cell center : ");
+                assert!(cell0_center.len() > 0);
+                for c in cell0_center {
+                    print!(" {:.3e}", c);
+                }
+                println!();
+            }
         }
         //
         self.compute_subtree_size();
@@ -774,6 +818,8 @@ where
     pub(crate) fn dump_layer(&self, layer: usize, level: usize) {
         self.layers[layer].dump(level);
     }
+
+    //
     /// gives a summary: number of cells by layer etc
     pub fn summary(&mut self) {
         //
@@ -781,7 +827,7 @@ where
             println!("layers not allocated");
             std::process::exit(1);
         }
-        println!(" number of layers : {}", self.get_nb_layers());
+        println!("\n number of layers : {}", self.get_nb_layers());
         for l in (0..self.get_nb_layers()).rev() {
             println!(
                 "layer : {}, nb cells : {}, cell diameter : {:.3e}, nbpoints : {}",
@@ -791,9 +837,11 @@ where
                 self.layers[l].count_points()
             );
         }
-    } // compute benefits by points (in fact cells at layer 0) and layer (See algo 2 of paper and lemma 3.4)
+    }
 
     //
+
+    // compute benefits by points (in fact cells at layer 0) and layer (See algo 2 of paper and lemma 3.4)
     pub(crate) fn compute_benefits(&self, version: usize) -> Vec<BenefitUnit> {
         match version {
             1 => self.compute_benefits_1(),
@@ -1068,16 +1116,13 @@ where
                         point.get_position(),
                         i
                     );
-                    if log::log_enabled!(log::Level::Debug) && clusters.len() % 10 == 0 {
-                        log::debug!("nb points dispacthed to clusters : {}", clusters.len());
-                    }
-                }
+                } // end !found
                 let old = nbpoint_i.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if log::log_enabled!(log::Level::Debug) && old % 10000 == 0 {
                     log::debug!("nb points dispacthed to clusters : {}", old);
                 }
-            });
-        }
+            }); // end for on points
+        } // end for i <= p_size
         log::info!(
             "points to dispatch : {}, nb points in clusters : {}",
             nb_points,
@@ -1119,25 +1164,30 @@ where
 
 pub(crate) fn dump_benefits<T>(spacemesh: &SpaceMesh<T>, benefits: &Vec<BenefitUnit>)
 where
-    T: Float + Debug + Sync,
+    T: Float + Debug + std::fmt::LowerExp + Sync,
 {
-    for unit in benefits {
-        log::debug!("\n {:?}", unit);
+    let dump_size = 100;
+    log::info!("dumping first {} units", dump_size);
+    for (rank, unit) in benefits.iter().enumerate().take(dump_size) {
+        log::debug!("\n unit rank {}, {:?}", rank, unit);
         let cell_idx0 = unit.get_cell_idx();
         let cell = spacemesh.get_cell(cell_idx0, 0).unwrap();
         let center = spacemesh.get_cell_center(cell_idx0, 0).unwrap();
-        log::debug!(
-            "cell center : {:?} nb point : {}",
-            center,
-            cell.get_nb_points()
-        );
+        log::debug!("nb point : {}", cell.get_nb_points());
+        if log::log_enabled!(log::Level::Debug) {
+            print!("center : \n");
+            for x in center {
+                print!(" {:.3e}", x);
+            }
+            println!();
+        }
     }
 }
 
 // we check we have a partition
 pub(crate) fn check_benefits_cover<T>(spacemesh: &SpaceMesh<T>, benefits: &Vec<BenefitUnit>)
 where
-    T: Float + Debug + Sync,
+    T: Float + Debug + std::fmt::LowerExp + Sync,
 {
     let mut nb_points_in: usize = 0;
     for unit in benefits {

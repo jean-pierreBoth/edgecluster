@@ -117,10 +117,10 @@ pub fn main() {
     let cpu_start = ProcessTime::now();
     let sys_now = SystemTime::now();
     // distance is normalized by pixel. Value of pixel between 0 and 256
-    let mindist = 2.;
+    let mindist = 0.01;
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(ref_points, None);
-    hcluster.cluster(mindist, 10);
+    let res = hcluster.cluster(mindist, 20);
     //
     let cpu_time: Duration = cpu_start.elapsed();
     println!(
@@ -128,4 +128,24 @@ pub fn main() {
         sys_now.elapsed().unwrap().as_millis(),
         cpu_time.as_millis()
     );
+    //
+    let refpoints = hcluster.get_points();
+    let centers = res.compute_cluster_center(&refpoints);
+    for (i, c) in centers.iter().enumerate() {
+        if hcluster.get_data_dim() <= 10 {
+            println!(
+                "center cluster : {},  size : {}, center : {:?}",
+                i,
+                res.get_cluster_size(i),
+                c
+            );
+        } else {
+            println!(
+                "center cluster : {},  size : {}",
+                i,
+                res.get_cluster_size(i),
+            );
+        }
+    }
+    println!("global cost : {:.3e}", res.compute_cost(&refpoints));
 }
