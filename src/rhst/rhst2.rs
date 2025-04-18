@@ -77,7 +77,7 @@ pub struct Space {
     // maximum space coordinate
     upper: f64,
     // minimum distance we want to discriminate
-    mindist: f64,
+    mindist: Option<f64>,
     //
     nb_layer: usize,
 }
@@ -86,38 +86,15 @@ impl Space {
     /// define Space.
     /// -
     ///
-    pub fn new(dim: usize, xmin: f64, xmax: f64, mindist: f64) -> Self {
+    pub fn new(dim: usize, xmin: f64, xmax: f64, mindist: Option<f64>) -> Self {
         // to ensure all data points are internal to the mesh
         let margin = 1.0E-2;
         //
         let width = xmax - xmin;
-        assert!(
-            mindist > 0.,
-            "mindist cannot be 0, should related to width so that max layer is not too large"
-        );
-        let layer_max_u: usize = ((dim as f64).sqrt() * width / mindist).log2().trunc() as usize;
-        let nb_layer = layer_max_u + 1;
-        log::info!(
-            "Space::new nb layer : {}, mindist : {:.2e}",
-            nb_layer,
-            mindist
-        );
-        let mut accepted_mindist = mindist;
-        if nb_layer > 16 {
-            log::error!("too many layers, mindist is too small");
-            accepted_mindist = (dim as f64).sqrt() * width / 2_i32.pow(16) as f64 * 2.;
-            log::warn!("resetting mindist to : {:.3e}", accepted_mindist);
-            let check = ((dim as f64).sqrt() * width / accepted_mindist)
-                .log2()
-                .ceil()
-                .trunc();
-            log::info!("check : {:.3e}", check);
+        if let Some(distance) = mindist {
             assert!(
-                ((dim as f64).sqrt() * width / accepted_mindist)
-                    .log2()
-                    .ceil()
-                    .trunc() as usize
-                    <= 15
+                distance > 0.,
+                "mindist cannot be 0, should related to width so that max layer is not too large"
             );
         }
         let (origin, upper) = compute_enclosing_bounds(xmin, xmax, margin);
@@ -125,13 +102,13 @@ impl Space {
         //
         Space {
             dim,
-            width: xmax - xmin,
+            width,
             xmin,
             margin,
             origin,
             upper,
-            mindist: accepted_mindist,
-            nb_layer,
+            mindist,
+            nb_layer: 0,
         }
     }
 
@@ -169,11 +146,11 @@ impl Space {
             self.xmin + self.width,
             self.get_margin()
         );
-        log::info!(
-            "nb layer : {}, mindist : {:.2e}",
-            self.nb_layer,
-            self.mindist
-        );
+        log::info!("nb layer : {}", self.nb_layer);
+        //
+        if let Some(epsil) = self.mindist {
+            log::info!("mindist : {:.3e}", epsil)
+        }
     }
 }
 
@@ -564,50 +541,50 @@ where
     /// - mindist to discriminate points. under this distance points will be associated
     ///
     pub fn new(space: &'a mut Space, points: Vec<&'a Point<T>>) -> Self {
-        assert!(
-            space.mindist > 0.,
-            "mindist cannot be 0, should related to width so that max layer is not too large"
-        );
         //
         let dim: usize = points[0].get_dimension();
-        let recommended_nb_layer: u16 =
-            (((1 + points.len().ilog2()) / dim as u32) + 1).min(15) as u16;
-        log::info!(
-            "depending on number of points, recommended nb layer : {}",
-            recommended_nb_layer
-        );
-        //
-        let layer_max_u: usize = 1
-            + ((space.get_dim() as f64).sqrt() * space.get_mesh_width() / space.mindist)
+        let recommended_nb_layer: usize;
+        if let Some(epsil) = space.mindist {
+            let aux = ((space.get_dim() as f64).sqrt() * space.get_mesh_width() / epsil)
                 .log2()
-                .trunc() as usize;
-        let nb_layer = layer_max_u + 1;
-        log::info!(
-            "depending on mindist  : {:.2e} nb layer recommended : {}",
-            space.mindist,
-            nb_layer
-        );
-        if nb_layer >= 8 {
-            log::warn!("perhaps increase mindist to reduce nb_layer");
-        }
-        let layer_max_scale: u16 = layer_max_u.try_into().unwrap();
-        let layer_max = 1 + (layer_max_scale + recommended_nb_layer) / 2;
-        let nb_layer = layer_max + 1;
-        space.mindist = (space.get_dim() as f64).sqrt() * space.get_mesh_width()
-            / 2i32.pow(nb_layer as u32 - 1) as f64;
-        space.nb_layer = nb_layer as usize;
+                .ceil();
+            // to get one point by cell in average
+            recommended_nb_layer = 15.min(aux as usize);
+            log::info!(
+                "depending on mindist  {:.3e} got nb_layer {}",
+                epsil,
+                recommended_nb_layer
+            );
+            if recommended_nb_layer >= 8 {
+                log::warn!("perhaps increase mindist to reduce nb_layer");
+            }
+        } else {
+            // to get one point by cell in average
+            let dimprodlayer = points.len().ilog2() as usize;
+            recommended_nb_layer = 15.min(dimprodlayer / dim).max(5);
+            let epsil = (space.get_dim() as f64).sqrt() * space.get_mesh_width()
+                / 2i32.pow(recommended_nb_layer as u32 - 1) as f64;
+            space.mindist = Some(epsil);
+            log::info!(
+                "no mindist got nb_layer {} mindist : {:.3e}",
+                recommended_nb_layer,
+                epsil
+            );
+        };
+
+        space.nb_layer = recommended_nb_layer as usize;
         //
         log::info!(
             "\n ******************************************* \n setting nb layer to {}, min cell diamter : {:.3e}\n",
-            nb_layer,
-            space.mindist
+            space.nb_layer,
+            space.mindist.unwrap()
         );
         //
-        let layers: Vec<Layer<T>> = Vec::with_capacity(nb_layer as usize);
+        let layers: Vec<Layer<T>> = Vec::with_capacity(space.nb_layer as usize);
         //
         SpaceMesh {
             space,
-            layer_max,
+            layer_max: (space.nb_layer - 1) as u16,
             layers,
             points: Some(points),
         }
@@ -652,7 +629,7 @@ where
 
     /// returns minimum distance detectable by mesh
     pub fn get_mindist(&self) -> f64 {
-        self.space.mindist
+        self.space.mindist.unwrap()
     }
 
     /// return number of cells in layer
@@ -795,7 +772,6 @@ where
             log::info!("index of first (in iterator) cell : {:?}", cell0_idx);
             if cell0_center.len() <= 20 || log::log_enabled!(log::Level::Debug) {
                 log::info!("coordinates of first cell center : ");
-                assert!(cell0_center.len() > 0);
                 for c in cell0_center {
                     print!(" {:.3e}", c);
                 }
@@ -1050,7 +1026,8 @@ where
         );
         let mut clusters = DashMap::<PointId, u32>::with_capacity(nb_points);
         //
-        for i in 0..p_size {
+        let loop_min_size = p_size.min(benefit_units.len());
+        for i in 0..loop_min_size {
             log::info!("benefit unit : {}", i);
             let unit = &benefit_units[i];
             let (_, layer) = unit.get_id();
@@ -1081,7 +1058,7 @@ where
                 let mut j = i + 1;
 
                 let found: bool = loop {
-                    if j >= p_size {
+                    if j >= benefit_units.len() {
                         break false;
                     }
                     let unit_j = &benefit_units[j];
@@ -1154,7 +1131,8 @@ where
             .iter()
             .map(|mesh_cell| mesh_cell.get_subtree_size())
             .sum();
-        log::info!("total sub tree size at layer l : {} = {}", l, size);
+        log::trace!("total sub tree size at layer l : {} = {}", l, size);
+        assert_eq!(size, self.get_nb_points());
         //
         size
     }
@@ -1269,7 +1247,7 @@ mod tests {
         }
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         // Space definition
-        let mut space = Space::new(dim, 0., width, mindist);
+        let mut space = Space::new(dim, 0., width, Some(mindist));
         let mut mesh = SpaceMesh::new(&mut space, refpoints);
         // check cell basics, center, index conversion
         //
@@ -1308,7 +1286,7 @@ mod tests {
         let width: f64 = 1000.;
         let mindist = 0.001;
         // Space definition
-        let _space = Space::new(dim, 0., width, mindist);
+        let _space = Space::new(dim, 0., width, Some(mindist));
     } // end of check_mindist
 
     #[test]
@@ -1332,7 +1310,7 @@ mod tests {
         }
         let refpoints: Vec<&Point<f32>> = points.iter().map(|p| p).collect();
         // Space definition
-        let mut space = Space::new(dim, 0., width, mindist);
+        let mut space = Space::new(dim, 0., width, Some(mindist));
 
         let mut mesh = SpaceMesh::new(&mut space, refpoints);
         mesh.embed();

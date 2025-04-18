@@ -108,7 +108,7 @@ pub struct Hcluster<'a, T> {
     //
     points: Vec<&'a Point<T>>,
     //
-    mindist: f64,
+    mindist: Option<f64>,
     //
     reducer: Option<&'a dyn reducer::Reducer<T>>,
     // dimension of reduced points if reduction was used
@@ -154,7 +154,7 @@ where
         Hcluster {
             debug_level: 0,
             points,
-            mindist: 0.,
+            mindist: None,
             reducer,
             reduced_dim: None,
             reduced_points: None,
@@ -180,7 +180,7 @@ where
     }
     //
     /// The function returns a map giving for each point id its cluster
-    pub fn cluster(&mut self, mindist: f64, nb_cluster: usize) -> ClusterResult {
+    pub fn cluster(&mut self, nb_cluster: usize, mindist: Option<f64>) -> ClusterResult {
         //
         let cpu_start = ProcessTime::now();
         let sys_now = SystemTime::now();
@@ -333,7 +333,7 @@ mod tests {
         //
         let mut hcluster = Hcluster::new(refpoints, None);
         hcluster.set_debug_level(1);
-        let res = hcluster.cluster(mindist, 10);
+        let res = hcluster.cluster(10, Some(mindist));
         //
         let refpoints = hcluster.get_points();
         let centers = res.compute_cluster_center(&refpoints);
@@ -356,7 +356,7 @@ mod tests {
         let nbvec = 10_00_000usize;
         let dim = 5;
         let width: f32 = 100.;
-        let mindist = 1.;
+        let mindist = 8.;
 
         // sample with coordinates following exponential law
         let law = Exp::<f32>::new(50. / width as f32).unwrap();
@@ -374,7 +374,7 @@ mod tests {
         // Space definition
         //
         let mut hcluster = Hcluster::new(refpoints, None);
-        let res = hcluster.cluster(mindist, 10);
+        let res = hcluster.cluster(10, Some(mindist));
         //
         let refpoints = hcluster.get_points();
         let centers = res.compute_cluster_center(&refpoints);

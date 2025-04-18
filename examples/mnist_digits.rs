@@ -117,10 +117,11 @@ pub fn main() {
     let cpu_start = ProcessTime::now();
     let sys_now = SystemTime::now();
     // distance is normalized by pixel. Value of pixel between 0 and 256
-    let mindist = 0.01;
+    let _mindist = Some(2.);
+    //===================================
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(ref_points, None);
-    let res = hcluster.cluster(mindist, 20);
+    let res = hcluster.cluster(15, None);
     //
     let cpu_time: Duration = cpu_start.elapsed();
     println!(
