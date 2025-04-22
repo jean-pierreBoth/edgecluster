@@ -23,23 +23,6 @@ use std::sync::atomic::AtomicUsize;
 
 use super::point::*;
 
-#[cfg_attr(doc, katexit::katexit)]
-/// structure describing space in which data point are supposed to live.
-/// Data are supposed to live in an enclosing box $$[xmin, xmax]^d$$
-///
-/// The algorithm split the data space in cubic cells.
-/// At each layer the edge cells are divided by 2, so the number of cells
-/// increase  with the data dimension.
-/// The increase is not exponential as we keep only cells with data points in it so the numbers of cells is
-/// bounded by the number of points in the data set.  
-/// Another characteristic is that the volume of a cell decrease by a factor $2^d$ at each layer, so $2^{(d*nblayer)}$ should be related to
-/// the number of points.
-///
-/// Nevertheless it requires data to have small/moderated dimension. This can be achieved using a first step of dimension reduction
-/// via random projections or an embedding via the crate [annembed](https://crates.io/crates/annembed)
-///
-///
-
 // given data min max , use margin to define enclosing space
 pub(crate) fn compute_enclosing_bounds(xmin: f64, xmax: f64, margin: f64) -> (f64, f64) {
     let origin: f64;
@@ -62,6 +45,21 @@ pub(crate) fn compute_enclosing_bounds(xmin: f64, xmax: f64, margin: f64) -> (f6
     (origin, upper)
 } // end of compute_enclosing_bounds
 
+#[cfg_attr(doc, katexit::katexit)]
+/// structure describing space in which data point are supposed to live.
+/// Data are supposed to live in an enclosing box $$[xmin, xmax]^d$$
+///
+/// The algorithm split the data space in cubic cells.
+/// At each layer the edge cells are divided by 2, so the number of cells
+/// increase  with the data dimension.
+/// The increase is not exponential as we keep only cells with data points in it so the numbers of cells is
+/// bounded by the number of points in the data set.  
+/// Another characteristic is that the volume of a cell decrease by a factor $2^d$ at each layer, so $2^{(d*nblayer)}$ should be related to
+/// the number of points.
+///
+/// Nevertheless it requires data to have small/moderated dimension. This can be achieved using a first step of dimension reduction
+/// via random projections or an embedding via the crate [annembed](https://crates.io/crates/annembed)
+///
 #[derive(Debug, Copy, Clone)]
 pub struct Space {
     // space dimension
@@ -572,7 +570,7 @@ where
             );
         };
 
-        space.nb_layer = recommended_nb_layer as usize;
+        space.nb_layer = recommended_nb_layer;
         //
         log::info!(
             "\n ******************************************* \n setting nb layer to {}, min cell diamter : {:.3e}\n",
@@ -580,7 +578,7 @@ where
             space.mindist.unwrap()
         );
         //
-        let layers: Vec<Layer<T>> = Vec::with_capacity(space.nb_layer as usize);
+        let layers: Vec<Layer<T>> = Vec::with_capacity(space.nb_layer);
         //
         SpaceMesh {
             space,
@@ -763,7 +761,7 @@ where
             let cell0 = layer.get_hcells().iter().nth(0).unwrap();
             let cell0_idx = cell0.get_cell_index();
             let cell0_center = cell0.get_cell_center();
-            assert!(cell0_center.len() > 0);
+            assert!(!cell0_center.is_empty());
             log::info!(
                 "\n layer : {}, cell diameter {:.3e}",
                 l,
@@ -1140,7 +1138,7 @@ where
 
 //==================
 
-pub(crate) fn dump_benefits<T>(spacemesh: &SpaceMesh<T>, benefits: &Vec<BenefitUnit>)
+pub(crate) fn dump_benefits<T>(spacemesh: &SpaceMesh<T>, benefits: &[BenefitUnit])
 where
     T: Float + Debug + std::fmt::LowerExp + Sync,
 {
@@ -1153,7 +1151,7 @@ where
         let center = spacemesh.get_cell_center(cell_idx0, 0).unwrap();
         log::debug!("nb point : {}", cell.get_nb_points());
         if log::log_enabled!(log::Level::Debug) {
-            print!("center : \n");
+            println!("center : ");
             for x in center {
                 print!(" {:.3e}", x);
             }

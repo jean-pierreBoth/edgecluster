@@ -3,6 +3,7 @@
 
 use dashmap::DashMap;
 use ndarray::{Array1, Array2};
+use std::collections::hash_map::Iter;
 use std::collections::HashMap;
 use std::hash::Hash;
 
@@ -12,8 +13,12 @@ use std::marker::PhantomData;
 /// The DataId should satisfy the Hash trait. Morally the label is a discrete value (satisfy the PrimInt trait)
 ///
 pub trait Affectation<DataId, DataLabel> {
+    /// given a dataId, returns its label or cluster Id
     fn get_affectation(&self, dataid: DataId) -> DataLabel;
+    /// returns the number of labels (or clusters)
     fn get_nb_cluster(&self) -> usize;
+    /// iterator on couples (dataid, label)
+    fn iter(&self) -> impl Iterator<Item = (DataId, DataLabel)>;
 }
 
 //==============================================================================
@@ -34,6 +39,44 @@ where
 
     fn get_nb_cluster(&self) -> usize {
         self.affectation.values().len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (DataId, DataLabel)> {
+        HashAffectationIter::new(self)
+    }
+}
+
+//==========================================================
+
+/// an iterator over affectations
+pub struct HashAffectationIter<'a, DataId, DataLabel> {
+    from: &'a HashAffectation<DataId, DataLabel>,
+    iter: std::collections::hash_map::Iter<'a, DataId, DataLabel>,
+}
+
+impl<'a, DataId, DataLabel> HashAffectationIter<'a, DataId, DataLabel>
+where
+    DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
+    DataLabel: PrimInt,
+{
+    //
+    pub fn new(from: &'a HashAffectation<DataId, DataLabel>) -> Self {
+        HashAffectationIter {
+            from,
+            iter: from.affectation.iter(),
+        }
+    }
+}
+
+impl<DataId, DataLabel> Iterator for HashAffectationIter<'_, DataId, DataLabel>
+where
+    DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
+    DataLabel: PrimInt,
+{
+    type Item = (DataId, DataLabel);
+    //
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|item| (*(item.0), *(item.1)))
     }
 }
 
@@ -57,6 +100,10 @@ where
     fn get_nb_cluster(&self) -> usize {
         self.nb_cluster
     }
+
+    fn iter(&self) -> impl Iterator<Item = (DataId, DataLabel)> {
+        DashAffectationIter::new(self)
+    }
 }
 
 impl<DataId, DataLabel> DashAffectation<DataId, DataLabel>
@@ -71,5 +118,41 @@ where
         }
     }
 }
+
+//==========================================================
+
+/// an iterator over affectations
+pub struct DashAffectationIter<'a, DataId, DataLabel> {
+    from: &'a DashAffectation<DataId, DataLabel>,
+    iter: dashmap::iter::Iter<'a, DataId, DataLabel>,
+}
+
+impl<'a, DataId, DataLabel> DashAffectationIter<'a, DataId, DataLabel>
+where
+    DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
+    DataLabel: PrimInt,
+{
+    //
+    pub fn new(from: &'a DashAffectation<DataId, DataLabel>) -> Self {
+        DashAffectationIter {
+            from,
+            iter: from.affectation.iter(),
+        }
+    }
+}
+
+impl<DataId, DataLabel> Iterator for DashAffectationIter<'_, DataId, DataLabel>
+where
+    DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
+    DataLabel: PrimInt,
+{
+    type Item = (DataId, DataLabel);
+    //
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter
+            .next()
+            .map(|item| (*(item.key()), *(item.value())))
+    }
+} // end of DashAffectationIter
 
 //===============================================================================
