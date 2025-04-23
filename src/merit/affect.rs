@@ -8,9 +8,12 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use num_traits::int::PrimInt;
+use num_traits::sign::Unsigned;
 use std::marker::PhantomData;
+/// The cluster affectation of any clustering scheme should be able to provide a structure implementing this trait.
+///
 /// Typically an affectation abstract a clusterization as something giving the label or the rank of the cluster attached to a dataid.  
-/// The DataId should satisfy the Hash trait. Morally the label is a discrete value (satisfy the PrimInt trait)
+/// The DataId should satisfy the Hash trait. Morally The label is a discrete value (satisfy the PrimInt + Unsigned trait).
 ///
 pub trait Affectation<DataId, DataLabel> {
     /// given a dataId, returns its label or cluster Id
@@ -46,7 +49,7 @@ where
     }
 }
 
-//==========================================================
+//
 
 /// an iterator over affectations
 pub struct HashAffectationIter<'a, DataId, DataLabel> {
@@ -83,12 +86,12 @@ where
 //==============================================================================
 
 /// Clusters defined by a DashMap
-pub struct DashAffectation<DataId, DataLabel> {
-    affectation: DashMap<DataId, DataLabel>,
+pub struct DashAffectation<'a, DataId, DataLabel> {
+    affectation: &'a DashMap<DataId, DataLabel>,
     nb_cluster: usize,
 }
 
-impl<DataId, DataLabel> Affectation<DataId, DataLabel> for DashAffectation<DataId, DataLabel>
+impl<DataId, DataLabel> Affectation<DataId, DataLabel> for DashAffectation<'_, DataId, DataLabel>
 where
     DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
     DataLabel: PrimInt,
@@ -106,12 +109,12 @@ where
     }
 }
 
-impl<DataId, DataLabel> DashAffectation<DataId, DataLabel>
+impl<'a, DataId, DataLabel> DashAffectation<'a, DataId, DataLabel>
 where
     DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
     DataLabel: PrimInt,
 {
-    pub fn new(affectation: DashMap<DataId, DataLabel>, nb_cluster: usize) -> Self {
+    pub fn new(affectation: &'a DashMap<DataId, DataLabel>, nb_cluster: usize) -> Self {
         DashAffectation {
             affectation,
             nb_cluster,
@@ -119,11 +122,11 @@ where
     }
 }
 
-//==========================================================
+//
 
-/// an iterator over affectations
+/// an iterator over affectations defined using a DashMap
 pub struct DashAffectationIter<'a, DataId, DataLabel> {
-    from: &'a DashAffectation<DataId, DataLabel>,
+    from: &'a DashAffectation<'a, DataId, DataLabel>,
     iter: dashmap::iter::Iter<'a, DataId, DataLabel>,
 }
 
@@ -156,3 +159,40 @@ where
 } // end of DashAffectationIter
 
 //===============================================================================
+
+// Affectation defined by a Vec<DataLabel
+
+/// Clusters defined by a Vec, DataId is an usize Vec[i] gives the label of the i-th data
+pub struct VecAffectation<'a, DataLabel> {
+    affectation: &'a Vec<DataLabel>,
+    nb_cluster: usize,
+}
+
+impl<'a, DataLabel> VecAffectation<'a, DataLabel> {
+    /// builds a vector affectation
+    pub fn new(affectation: &'a Vec<DataLabel>, nb_cluster: usize) -> Self {
+        VecAffectation {
+            affectation,
+            nb_cluster,
+        }
+    }
+}
+
+impl<DataLabel> Affectation<usize, DataLabel> for VecAffectation<'_, DataLabel>
+where
+    DataLabel: PrimInt,
+{
+    fn get_affectation(&self, id: usize) -> DataLabel {
+        self.affectation[id]
+    }
+
+    fn get_nb_cluster(&self) -> usize {
+        self.nb_cluster
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (usize, DataLabel)> {
+        (0..self.affectation.len())
+            .zip(self.affectation.iter())
+            .map(|it| (it.0, *(it.1)))
+    }
+}

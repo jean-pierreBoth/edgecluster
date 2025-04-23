@@ -17,6 +17,8 @@ use super::point::*;
 use super::rhst2::*;
 use crate::smalld::*;
 
+use crate::merit::affect::*;
+
 //===========================
 
 pub struct ClusterResult {
@@ -98,6 +100,11 @@ impl ClusterResult {
         }
         norm /= T::from(points.len()).unwrap();
         norm.sqrt()
+    }
+
+    /// Return struct DashAffectation which implement trait Affectation<usize, u32>
+    pub fn get_data_affectation(&self) -> DashAffectation<usize, u32> {
+        DashAffectation::<usize, u32>::new(&self.map, self.clusters.len())
     }
 } // end of impl ClusterResult
 
