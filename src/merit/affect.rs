@@ -34,7 +34,7 @@ pub struct HashAffectation<DataId, DataLabel> {
 impl<DataId, DataLabel> Affectation<DataId, DataLabel> for HashAffectation<DataId, DataLabel>
 where
     DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
-    DataLabel: PrimInt,
+    DataLabel: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
 {
     fn get_affectation(&self, id: DataId) -> DataLabel {
         *self.affectation.get(&id).unwrap()
@@ -60,7 +60,7 @@ pub struct HashAffectationIter<'a, DataId, DataLabel> {
 impl<'a, DataId, DataLabel> HashAffectationIter<'a, DataId, DataLabel>
 where
     DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
-    DataLabel: PrimInt,
+    DataLabel: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
 {
     //
     pub fn new(from: &'a HashAffectation<DataId, DataLabel>) -> Self {
@@ -74,7 +74,7 @@ where
 impl<DataId, DataLabel> Iterator for HashAffectationIter<'_, DataId, DataLabel>
 where
     DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
-    DataLabel: PrimInt,
+    DataLabel: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
 {
     type Item = (DataId, DataLabel);
     //
@@ -94,7 +94,7 @@ pub struct DashAffectation<'a, DataId, DataLabel> {
 impl<DataId, DataLabel> Affectation<DataId, DataLabel> for DashAffectation<'_, DataId, DataLabel>
 where
     DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
-    DataLabel: PrimInt,
+    DataLabel: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
 {
     fn get_affectation(&self, id: DataId) -> DataLabel {
         let item = self.affectation.get(&id).unwrap();
@@ -112,7 +112,7 @@ where
 impl<'a, DataId, DataLabel> DashAffectation<'a, DataId, DataLabel>
 where
     DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
-    DataLabel: PrimInt,
+    DataLabel: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
 {
     pub fn new(affectation: &'a DashMap<DataId, DataLabel>, nb_cluster: usize) -> Self {
         DashAffectation {
@@ -133,7 +133,7 @@ pub struct DashAffectationIter<'a, DataId, DataLabel> {
 impl<'a, DataId, DataLabel> DashAffectationIter<'a, DataId, DataLabel>
 where
     DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
-    DataLabel: PrimInt,
+    DataLabel: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
 {
     //
     pub fn new(from: &'a DashAffectation<DataId, DataLabel>) -> Self {
@@ -147,7 +147,7 @@ where
 impl<DataId, DataLabel> Iterator for DashAffectationIter<'_, DataId, DataLabel>
 where
     DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
-    DataLabel: PrimInt,
+    DataLabel: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
 {
     type Item = (DataId, DataLabel);
     //
@@ -162,7 +162,7 @@ where
 
 // Affectation defined by a Vec<DataLabel
 
-/// Clusters defined by a Vec, DataId is an usize Vec[i] gives the label of the i-th data
+/// Clusters defined by a Vec, DataId is an usize Vec\[i\] gives the label of the i-th data
 pub struct VecAffectation<'a, DataLabel> {
     affectation: &'a Vec<DataLabel>,
     nb_cluster: usize,
@@ -180,7 +180,7 @@ impl<'a, DataLabel> VecAffectation<'a, DataLabel> {
 
 impl<DataLabel> Affectation<usize, DataLabel> for VecAffectation<'_, DataLabel>
 where
-    DataLabel: PrimInt,
+    DataLabel: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
 {
     fn get_affectation(&self, id: usize) -> DataLabel {
         self.affectation[id]

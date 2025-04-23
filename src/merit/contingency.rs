@@ -12,8 +12,24 @@ use std::marker::PhantomData;
 use super::affect::*;
 //================================================================================
 
-/// Contingency table associated to the 2 affectations to compare
-/// We can compare either a true (reference) labels of data or 2 clusters algorithms
+#[cfg_attr(doc, katexit::katexit)]
+/// Contingency table associated to the 2 clusterization (affectations) to compare. We can compare either a true (reference) labels of data or 2 clusters algorithms  
+/// The various merit functions relies on comparisons entropy of cluster distribution.  
+///
+///
+/// We contruct a contingency matrix $ \left(n_{ij} \right) $  with $ i \le n_{1}, j \le n_{2} $ with $ n_{ij} =   | C_{1}[i] \cap C_{2}[j] | $ with $ C_{1}[i] $ designing the i-th cluster in C1 clusterization.
+/// We call:
+/// - N : the number of elements to cluster
+/// - $NC_{1}$ (resp. $NC_{2}$) the number of clusters of the first (resp. second) clusterization.
+///
+/// The following entropies are then computed:
+/// - $ H(C_{1}) = - \sum_{i \le NC_{1}}  \frac{|C_1[i]|}{N} \log \frac{|C_1[i]|}{N} $
+/// - $ H(C_{2}) = - \sum_{i \le NC_{2}}  \frac{|C_2[i]|}{N} \log \frac{|C_2[i]|}{N} $  
+/// - $ H(C_{1},C_{2}) = - \sum_{i \le NC_{1}, j \le NC_{2}}  \frac{n_{ij}}{N} \log \frac{n_{ij}}{N} $
+/// - $ H(C_{1}| C_{2}) = - \sum_{i \le NC_{1}, j \le NC_{2}}  \frac{n_{ij}}{N} \log \frac{n_{ij}/N} {|C_2[j]|/N} $
+///
+/// Various indicators can then be computed (some are even metrics), we choose normalized versions i.e there values are in the range [0,1].  
+/// See the different functions
 pub struct Contingency<Clusterization, DataId, DataLabel>
 where
     Clusterization: Affectation<DataId, DataLabel>,
@@ -81,6 +97,18 @@ where
             table[[rank_l1, rank_l2]] += 1;
         }
         // TODO: compute entropies H and I
+        let entropy_1 = c1_size
+            .iter()
+            .fold(0., |acc, x| acc - *x as f64 * log_with0(*x as f64));
+        //
+        let entropy_2 = c2_size
+            .iter()
+            .fold(0., |acc, x| acc - *x as f64 * log_with0(*x as f64));
+        //
+        let entropy_12 = table
+            .iter()
+            .fold(0., |acc, x| acc - *x as f64 * log_with0(*x as f64));
+        //
         //
         Contingency {
             clusters1,
@@ -95,8 +123,22 @@ where
         }
     }
 
-    /// compute normalized mutual information  joint
+    #[cfg_attr(doc, katexit::katexit)]
+    /// compute normalized mutual information joint version
+    /// compures $ 1. - \frac{I(C_{1}, C_{2})}{H(C_{1}, C_{2})} $.  
+    /// This fonction is a metric.
     pub fn get_nmi_joint(&self) -> f64 {
         panic!("not yet impelemnted");
     }
 } // end of Contingency
+
+// for entropy calculations log(0) = 0...
+fn log_with0(arg: f64) -> f64 {
+    if arg > 0. {
+        arg.ln()
+    } else if arg < 0. {
+        panic!("log cannot have negative arg");
+    } else {
+        0.
+    }
+}
