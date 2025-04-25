@@ -1,5 +1,5 @@
 [package]
-name = "edgeclust"
+name = "edgecluster"
 version = "0.0.1"
 authors = ["jeanpierre.both@gmail.com"]
 repository = "https://github.com/jean-pierreBoth/edgeclust"

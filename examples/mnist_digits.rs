@@ -10,10 +10,12 @@ use std::path::PathBuf;
 use std::{collections::HashMap, fs::OpenOptions};
 
 use cpu_time::ProcessTime;
+use dashmap::DashMap;
 use std::time::{Duration, SystemTime};
 
-use edgeclust::rhst::*;
+use edgecluster::rhst::*;
 mod utils;
+use edgecluster::merit::*;
 use utils::mnistio::*;
 
 const MNIST_DIGITS_DIR: &str = "/home/jpboth/Data/ANN/MNIST/";
@@ -101,7 +103,7 @@ pub fn main() {
     let points: Vec<Point<f32>> = (0..labels.len())
         .map(|i| Point::<f32>::new(i, images_as_v[i].clone(), labels[i] as u32))
         .collect();
-    let ref_points = points.iter().map(|p| p).collect();
+    let ref_points: Vec<&Point<f32>> = points.iter().map(|p| p).collect();
     //
     let mut labels_distribution = HashMap::<u32, u32>::with_capacity(10);
     for p in &points {
@@ -114,14 +116,24 @@ pub fn main() {
     for (l, count) in labels_distribution {
         println!("label : {}, count : {}", l, count);
     }
+    //
     let cpu_start = ProcessTime::now();
     let sys_now = SystemTime::now();
     // distance is normalized by pixel. Value of pixel between 0 and 256
+    //===================================
+    let nb_cluster_asked = 25;
     let _mindist = Some(2.);
     //===================================
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(ref_points, None);
-    let res = hcluster.cluster(15, None);
+    let cluster_res = hcluster.cluster(nb_cluster_asked, None);
+    let algo_affectation = cluster_res.get_dash_affectation();
+    // We construct a corresponding Affectation structure to compare clusters with true labels
+    let ref_hashmap = DashMap::<usize, u32>::new();
+    for (i, l) in labels.iter().enumerate() {
+        ref_hashmap.insert(i, *l as u32);
+    }
+    let ref_affectation = DashAffectation::new(&ref_hashmap, 10);
     //
     let cpu_time: Duration = cpu_start.elapsed();
     println!(
@@ -131,22 +143,37 @@ pub fn main() {
     );
     //
     let refpoints = hcluster.get_points();
-    let centers = res.compute_cluster_center(&refpoints);
+    let centers = cluster_res.compute_cluster_center(&refpoints);
     for (i, c) in centers.iter().enumerate() {
         if hcluster.get_data_dim() <= 10 {
             println!(
                 "center cluster : {},  size : {}, center : {:?}",
                 i,
-                res.get_cluster_size(i),
+                cluster_res.get_cluster_size(i),
                 c
             );
         } else {
             println!(
                 "center cluster : {},  size : {}",
                 i,
-                res.get_cluster_size(i),
+                cluster_res.get_cluster_size(i),
             );
         }
     }
-    println!("global cost : {:.3e}", res.compute_cost(&refpoints));
+    println!("global cost : {:.3e}", cluster_res.compute_cost(&refpoints));
+    // merit comparison
+    println!("merit ctatus");
+    //
+    let contingency = Contingency::<DashAffectation<usize, u32>, usize, u32>::new(
+        ref_affectation,
+        algo_affectation,
+    );
+    contingency.dump_entropies();
+    let nmi_joint: f64 = contingency.get_nmi_joint();
+    println!("mnist digits results with {} clusters", nb_cluster_asked);
+    println!("mnit disgit nmi joint : {:.3e}", nmi_joint);
+
+    let nmi_mean: f64 = contingency.get_nmi_mean();
+    println!("mnist digits results with {} clusters", nb_cluster_asked);
+    println!("mnit disgit nmi mean : {:.3e}", nmi_mean);
 }

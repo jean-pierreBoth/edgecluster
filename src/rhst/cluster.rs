@@ -49,8 +49,14 @@ impl ClusterResult {
         }
     }
 
+    /// returns the number of points in cluster i
     pub fn get_cluster_size(&self, i: usize) -> usize {
         self.clusters[i].len()
+    }
+
+    /// returns the number of data to cluster
+    pub fn get_nb_points(&self) -> usize {
+        self.map.len()
     }
 
     pub fn compute_cluster_center<
@@ -82,6 +88,9 @@ impl ClusterResult {
         centers
     }
 
+    #[cfg_attr(doc, katexit::katexit)]
+    /// cost returned is
+    /// $ 1./N * \sum_{1}^{N}  ||x_{i} - C(x_{i})||^{2} $ where $C(x_{i})$ is the nearest cluster center for $ x_{i}$
     pub fn compute_cost<T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign>(
         &self,
         points: &[&Point<T>],
@@ -99,11 +108,11 @@ impl ClusterResult {
                 .fold(T::zero(), |acc, (p, c)| (acc + (*p - *c) * (*p - *c)));
         }
         norm /= T::from(points.len()).unwrap();
-        norm.sqrt()
+        norm
     }
 
     /// Return struct DashAffectation which implement trait Affectation<usize, u32>
-    pub fn get_data_affectation(&self) -> DashAffectation<usize, u32> {
+    pub fn get_dash_affectation(&self) -> DashAffectation<usize, u32> {
         DashAffectation::<usize, u32>::new(&self.map, self.clusters.len())
     }
 } // end of impl ClusterResult

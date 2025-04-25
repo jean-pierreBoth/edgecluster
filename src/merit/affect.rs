@@ -20,6 +20,8 @@ pub trait Affectation<DataId, DataLabel> {
     fn get_affectation(&self, dataid: DataId) -> DataLabel;
     /// returns the number of labels (or clusters)
     fn get_nb_cluster(&self) -> usize;
+    /// returns number of points in clusters
+    fn get_nb_points(&self) -> usize;
     /// iterator on couples (dataid, label)
     fn iter(&self) -> impl Iterator<Item = (DataId, DataLabel)>;
 }
@@ -42,6 +44,10 @@ where
 
     fn get_nb_cluster(&self) -> usize {
         self.affectation.values().len()
+    }
+
+    fn get_nb_points(&self) -> usize {
+        self.affectation.len()
     }
 
     fn iter(&self) -> impl Iterator<Item = (DataId, DataLabel)> {
@@ -104,6 +110,10 @@ where
         self.nb_cluster
     }
 
+    fn get_nb_points(&self) -> usize {
+        self.affectation.len()
+    }
+
     fn iter(&self) -> impl Iterator<Item = (DataId, DataLabel)> {
         DashAffectationIter::new(self)
     }
@@ -163,14 +173,14 @@ where
 // Affectation defined by a Vec<DataLabel
 
 /// Clusters defined by a Vec, DataId is an usize Vec\[i\] gives the label of the i-th data
-pub struct VecAffectation<'a, DataLabel> {
-    affectation: &'a Vec<DataLabel>,
+pub struct VecAffectation<DataLabel> {
+    affectation: Vec<DataLabel>,
     nb_cluster: usize,
 }
 
-impl<'a, DataLabel> VecAffectation<'a, DataLabel> {
+impl<DataLabel> VecAffectation<DataLabel> {
     /// builds a vector affectation
-    pub fn new(affectation: &'a Vec<DataLabel>, nb_cluster: usize) -> Self {
+    pub fn new(affectation: Vec<DataLabel>, nb_cluster: usize) -> Self {
         VecAffectation {
             affectation,
             nb_cluster,
@@ -178,7 +188,7 @@ impl<'a, DataLabel> VecAffectation<'a, DataLabel> {
     }
 }
 
-impl<DataLabel> Affectation<usize, DataLabel> for VecAffectation<'_, DataLabel>
+impl<DataLabel> Affectation<usize, DataLabel> for VecAffectation<DataLabel>
 where
     DataLabel: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
 {
@@ -188,6 +198,10 @@ where
 
     fn get_nb_cluster(&self) -> usize {
         self.nb_cluster
+    }
+
+    fn get_nb_points(&self) -> usize {
+        self.affectation.len()
     }
 
     fn iter(&self) -> impl Iterator<Item = (usize, DataLabel)> {

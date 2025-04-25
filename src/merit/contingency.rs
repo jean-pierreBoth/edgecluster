@@ -27,6 +27,7 @@ use super::affect::*;
 /// - $ H(C_{2}) = - \sum_{i \le NC_{2}}  \frac{|C_2[i]|}{N} \log \frac{|C_2[i]|}{N} $  
 /// - $ H(C_{1},C_{2}) = - \sum_{i \le NC_{1}, j \le NC_{2}}  \frac{n_{ij}}{N} \log \frac{n_{ij}}{N} $
 /// - $ H(C_{1}| C_{2}) = - \sum_{i \le NC_{1}, j \le NC_{2}}  \frac{n_{ij}}{N} \log \frac{n_{ij}/N} {|C_2[j]|/N} $
+/// - $ I(C_{1}| C_{2}) = \sum_{i \le NC_{1}, j \le NC_{2}}  \frac{n_{ij}}{N} \log \frac{n_{ij}/N} { |C_1[i]| *|C_2[j]|/N^{2}} $.  
 ///
 /// Various indicators can then be computed (some are even metrics), we choose normalized versions i.e there values are in the range [0,1].  
 /// See the different functions
@@ -49,6 +50,12 @@ where
     c1_size: Array1<usize>,
     // number of elements in each clusters of cluster2
     c2_size: Array1<usize>,
+    // entropies and information
+    entropy_1: f64,
+    entropy_2: f64,
+    entropy_12: f64,
+    entropy_1cond2: f64,
+    information_12: f64,
     //
     _t_id: PhantomData<DataId>,
     _t_label: PhantomData<DataLabel>,
@@ -61,6 +68,8 @@ where
     DataLabel: PrimInt + Hash,
 {
     pub fn new(clusters1: Clusterization, clusters2: Clusterization) -> Self {
+        assert_eq!(clusters1.get_nb_points(), clusters2.get_nb_points());
+        //
         let nbclust1 = clusters1.get_nb_cluster();
         let nbclust2: usize = clusters2.get_nb_cluster();
         let mut table = Array2::<usize>::zeros((nbclust1, nbclust2));
@@ -96,19 +105,37 @@ where
             // and summing on rows item in cluster2 appears exactly once (as long as the same set of DataId is in both clusterization)
             table[[rank_l1, rank_l2]] += 1;
         }
-        // TODO: compute entropies H and I
-        let entropy_1 = c1_size
-            .iter()
-            .fold(0., |acc, x| acc - *x as f64 * log_with0(*x as f64));
+        // compute entropies H and I
+        let nb_total_usize = c1_size.iter().fold(0, |acc, x| acc + *x);
+        assert_eq!(nb_total_usize, clusters1.get_nb_points());
+        assert_eq!(nb_total_usize, c2_size.iter().fold(0, |acc, x| acc + *x));
+        let nb_total = nb_total_usize as f64;
+        let entropy_1 = c1_size.iter().fold(0., |acc, x| {
+            acc - *x as f64 * log_with0(*x as f64 / nb_total)
+        }) / nb_total;
         //
-        let entropy_2 = c2_size
-            .iter()
-            .fold(0., |acc, x| acc - *x as f64 * log_with0(*x as f64));
+        let entropy_2 = c2_size.iter().fold(0., |acc, x| {
+            acc - *x as f64 * log_with0(*x as f64 / nb_total)
+        }) / nb_total;
         //
-        let entropy_12 = table
-            .iter()
-            .fold(0., |acc, x| acc - *x as f64 * log_with0(*x as f64));
+        let entropy_12 = table.iter().fold(0., |acc, x| {
+            acc - *x as f64 * log_with0(*x as f64 / nb_total)
+        }) / nb_total;
         //
+        let mut entropy_1cond2: f64 = 0.;
+        let mut information_12: f64 = 0.;
+        for i in 0..nbclust1 {
+            let frac_i: f64 = c1_size[i] as f64 / nb_total;
+            for j in 0..nbclust2 {
+                let frac_ij = table[[i, j]] as f64 / nb_total;
+                let frac_j: f64 = c2_size[j] as f64 / nb_total;
+                //
+                entropy_1cond2 -= table[[i, j]] as f64 * log_with0(frac_ij / frac_j);
+                information_12 += table[[i, j]] as f64 * log_with0((frac_ij) / (frac_i * frac_j));
+            }
+        }
+        entropy_1cond2 /= nb_total;
+        information_12 /= nb_total;
         //
         Contingency {
             clusters1,
@@ -118,17 +145,69 @@ where
             table,
             c1_size,
             c2_size,
+            entropy_1,
+            entropy_2,
+            entropy_12,
+            entropy_1cond2,
+            information_12,
             _t_id: PhantomData,
             _t_label: PhantomData,
         }
     }
 
+    /// returns entropy of cluster 1 distribution
+    pub fn get_entropy_1(&self) -> f64 {
+        self.entropy_1
+    }
+
+    /// returns entropy of cluster 1 distribution
+    pub fn get_entropy_2(&self) -> f64 {
+        self.entropy_2
+    }
+
+    /// returns joint entropy of clusters distribution
+    pub fn get_joint_entropy(&self) -> f64 {
+        self.entropy_12
+    }
+
+    pub fn get_entropy_1cond2(&self) -> f64 {
+        self.entropy_1cond2
+    }
+
+    pub fn get_information(&self) -> f64 {
+        self.information_12
+    }
+
+    pub fn dump_entropies(&self) {
+        log::info!(" entropy1 : {:.3e}", self.entropy_1);
+        log::info!(" entropy2 : {:.3e}", self.entropy_2);
+        log::info!(" entropy_12 : {:.3e}", self.entropy_12);
+        log::info!(" entropy_1cond2 : {:.3e}", self.entropy_1cond2);
+        log::info!("  information_12: {:.3e}", self.information_12);
+    }
+
     #[cfg_attr(doc, katexit::katexit)]
-    /// compute normalized mutual information joint version
-    /// compures $ 1. - \frac{I(C_{1}, C_{2})}{H(C_{1}, C_{2})} $.  
-    /// This fonction is a metric.
+    /// compute normalized mutual information joint version.  
+    /// returns $ \frac{I(C_{1}, C_{2})}{H(C_{1}, C_{2})} $.   
+    /// Note that : $ 1. - \frac{I(C_{1}, C_{2})}{H(C_{1}, C_{2})} $ is a metric.
     pub fn get_nmi_joint(&self) -> f64 {
-        panic!("not yet impelemnted");
+        self.information_12 / self.entropy_12
+    }
+
+    #[cfg_attr(doc, katexit::katexit)]
+    /// compute normalized mutual information max version
+    /// returns $ \frac{I(C_{1}, C_{2})}{max (H(C_{1}),  H(C_{2})} $.    
+    /// Note that : $ .1 - \frac{I(C_{1}, C_{2})}{max (H(C_{1}),  H(C_{2})} $ is a metric.
+    pub fn get_nmi_max(&self) -> f64 {
+        self.information_12 / (self.entropy_1.max(self.entropy_2))
+    }
+
+    #[cfg_attr(doc, katexit::katexit)]
+    /// compute normalized mutual information max version
+    /// returns $ \frac{I(C_{1}, C_{2})}{0.5 * (H(C_{1}) +  H(C_{2})} $.    
+    /// Note that : $ .1 - \frac{I(C_{1}, C_{2})}{max (H(C_{1}),  H(C_{2})} $ is a metric.
+    pub fn get_nmi_mean(&self) -> f64 {
+        2. * self.information_12 / (self.entropy_1 + self.entropy_2)
     }
 } // end of Contingency
 
