@@ -1,7 +1,5 @@
 //! contingency table
 
-#![allow(unused)]
-
 use indexmap::IndexSet;
 use ndarray::{Array1, Array2};
 use std::hash::Hash;
@@ -37,18 +35,25 @@ where
     DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
     DataLabel: PrimInt,
 {
+    #[allow(unused)]
     // clusters (or reference)
     clusters1: Clusterization,
     // clusters (or reference)
+    #[allow(unused)]
     clusters2: Clusterization,
     // transform labels set to usize range for array indexation
+    #[allow(unused)]
     labels1: IndexSet<DataLabel>,
+    #[allow(unused)]
     labels2: IndexSet<DataLabel>,
     // The contingency table. dimension (cluster1.nb_cluster, cluster2.nb_cluster)
+    #[allow(unused)]
     table: Array2<usize>,
     // number of elements in each clusters of cluster1
+    #[allow(unused)]
     c1_size: Array1<usize>,
     // number of elements in each clusters of cluster2
+    #[allow(unused)]
     c2_size: Array1<usize>,
     // entropies and information
     entropy_1: f64,
@@ -82,12 +87,12 @@ where
         //
         let mut labels1 = IndexSet::<DataLabel>::with_capacity(nbclust1);
         let affect1_iter = clusters1.iter();
-        for (id, label) in affect1_iter {
+        for (_, label) in affect1_iter {
             labels1.insert(label);
         }
         let mut labels2 = IndexSet::<DataLabel>::with_capacity(nbclust1);
         let affect2_iter = clusters2.iter();
-        for (id, label) in affect2_iter {
+        for (_, label) in affect2_iter {
             labels2.insert(label);
         }
         // computes contingency table
@@ -95,7 +100,6 @@ where
         // we loop on affect1_iter, query each item relativeley to clusters2 and dispatch to table
         for (id1, label1) in affect1_iter {
             // we loop on affect2_iter, query each item relativeley to clusters2 and dispatch to table
-            let affect2_iter = clusters2.iter();
             let rank_l1 = labels1.get_index_of(&label1).unwrap();
             c1_size[rank_l1] += 1;
             let label2 = clusters2.get_affectation(id1);
@@ -183,7 +187,21 @@ where
         log::info!(" entropy2 : {:.3e}", self.entropy_2);
         log::info!(" entropy_12 : {:.3e}", self.entropy_12);
         log::info!(" entropy_1cond2 : {:.3e}", self.entropy_1cond2);
-        log::info!("  information_12: {:.3e}", self.information_12);
+        log::info!(
+            " information_12: {:.3e} expecation upper bound {:.3e}",
+            self.information_12,
+            self.information_ebound()
+        );
+    }
+
+    /// upper bound of expectation of joint information
+    pub fn information_ebound(&self) -> f64 {
+        let nbclust1 = self.clusters1.get_nb_cluster();
+        let nbclust2: usize = self.clusters2.get_nb_cluster();
+        let nb_total = self.clusters1.get_nb_points();
+        let a: usize = nb_total + nbclust1 * nbclust2 - nbclust1 - nbclust2;
+        //
+        ((a as f64) / (nb_total - 1) as f64).ln()
     }
 
     #[cfg_attr(doc, katexit::katexit)]
@@ -203,11 +221,23 @@ where
     }
 
     #[cfg_attr(doc, katexit::katexit)]
-    /// compute normalized mutual information max version
+    /// compute normalized mutual information mean version
     /// returns $ \frac{I(C_{1}, C_{2})}{0.5 * (H(C_{1}) +  H(C_{2})} $.    
-    /// Note that : $ .1 - \frac{I(C_{1}, C_{2})}{max (H(C_{1}),  H(C_{2})} $ is a metric.
+    /// Note that : $ .1 - \frac{I(C_{1}, C_{2})}{max (H(C_{1}),  H(C_{2})} $ is not a metric.
     pub fn get_nmi_mean(&self) -> f64 {
         2. * self.information_12 / (self.entropy_1 + self.entropy_2)
+    }
+
+    #[cfg_attr(doc, katexit::katexit)]
+    /// compute normalized mutual information sqrt version
+    /// returns $ \frac{I(C_{1}, C_{2}) }{\sqrt{ H(C_{1}) * H(C_{2})} } $   
+    /// Note that : $ 1. - \frac{I(C_{1}, C_{2})}{\sqrt{H(C_{1}) * H(C_{2})} } $ is not a metric.
+    pub fn get_nmi_sqrt(&self) -> f64 {
+        self.information_12 / (self.entropy_1 * self.entropy_2).sqrt()
+    }
+
+    pub fn information_12_expectation(&self) -> f64 {
+        panic!("not yet implemented")
     }
 } // end of Contingency
 

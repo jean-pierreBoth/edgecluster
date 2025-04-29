@@ -105,7 +105,7 @@ impl ClusterResult {
             norm += xyz
                 .iter()
                 .zip(&centers[cluster as usize])
-                .fold(T::zero(), |acc, (p, c)| (acc + (*p - *c) * (*p - *c)));
+                .fold(T::zero(), |acc, (p, c)| (acc + (*p - *c).abs()));
         }
         norm /= T::from(points.len()).unwrap();
         norm
@@ -196,7 +196,12 @@ where
     }
     //
     /// The function returns a map giving for each point id its cluster
-    pub fn cluster(&mut self, nb_cluster: usize, mindist: Option<f64>) -> ClusterResult {
+    pub fn cluster(
+        &mut self,
+        nb_cluster: usize,
+        mindist: Option<f64>,
+        reduced_dim_opt: Option<usize>,
+    ) -> ClusterResult {
         //
         let cpu_start = ProcessTime::now();
         let sys_now = SystemTime::now();
@@ -216,8 +221,18 @@ where
         log::debug!("dim : {} xmin : {:.3e}, xmax : {:.3e}", dim, xmin, xmax);
         // TODO: do we need to keep points in HCluster (we clone a vec of references)
         let points_to_cluster: Vec<&Point<T>>;
-        if dim > self.points.len().ilog(2) as usize {
-            let to_dim = 10.min((self.points.len().ilog(2) as usize) / 4);
+        let reduced_dim = match reduced_dim_opt {
+            Some(d) => d,
+            _ => 0,
+        };
+        if dim > self.points.len().ilog(2) as usize || reduced_dim > 0 {
+            let to_dim_tmp = 10.min(self.points.len().ilog(2) / 2);
+            let mut to_dim = nb_cluster.ilog(2).min(to_dim_tmp) as usize;
+            if reduced_dim > 0 {
+                to_dim = to_dim.min(reduced_dim);
+            } else {
+                to_dim = reduced_dim;
+            }
             log::info!("reducing dimension from : {} to : {}", dim, to_dim);
             // we reduce dimension
             self.reduced_points = Some(self.reduce_points(to_dim));
@@ -253,9 +268,9 @@ where
         //
         spacemesh.summary();
 
-        let filtered_benefits = spacemesh.compute_benefits(1);
-        if log::log_enabled!(log::Level::Debug) {
-            log::debug!(
+        let filtered_benefits = spacemesh.compute_benefits(2);
+        if log::log_enabled!(log::Level::Trace) {
+            log::trace!(
                 "dump of filtered_benefits, nbunits : {}",
                 filtered_benefits.len()
             );
@@ -349,7 +364,7 @@ mod tests {
         //
         let mut hcluster = Hcluster::new(refpoints, None);
         hcluster.set_debug_level(1);
-        let res = hcluster.cluster(10, Some(mindist));
+        let res = hcluster.cluster(10, Some(mindist), None);
         //
         let refpoints = hcluster.get_points();
         let centers = res.compute_cluster_center(&refpoints);
@@ -372,7 +387,7 @@ mod tests {
         let nbvec = 10_00_000usize;
         let dim = 5;
         let width: f32 = 100.;
-        let mindist = 8.;
+        let mindist = 4.;
 
         // sample with coordinates following exponential law
         let law = Exp::<f32>::new(50. / width as f32).unwrap();
@@ -390,7 +405,7 @@ mod tests {
         // Space definition
         //
         let mut hcluster = Hcluster::new(refpoints, None);
-        let res = hcluster.cluster(10, Some(mindist));
+        let res = hcluster.cluster(10, Some(mindist), None);
         //
         let refpoints = hcluster.get_points();
         let centers = res.compute_cluster_center(&refpoints);

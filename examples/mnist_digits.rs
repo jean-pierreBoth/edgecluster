@@ -176,4 +176,8 @@ pub fn main() {
     let nmi_mean: f64 = contingency.get_nmi_mean();
     println!("mnist digits results with {} clusters", nb_cluster_asked);
     println!("mnit disgit nmi mean : {:.3e}", nmi_mean);
+
+    let nmi_sqrt: f64 = contingency.get_nmi_sqrt();
+    println!("mnist digits results with {} clusters", nb_cluster_asked);
+    println!("mnit disgit nmi sqrt : {:.3e}", nmi_sqrt);
 }

@@ -26,6 +26,7 @@ use super::point::*;
 // given data min max , use margin to define enclosing space
 pub(crate) fn compute_enclosing_bounds(xmin: f64, xmax: f64, margin: f64) -> (f64, f64) {
     let origin: f64;
+    assert!(margin > 0. && margin < 1.);
     if xmin > 0. {
         origin = xmin * (1. - margin);
     } else if xmin < 0. {
@@ -127,13 +128,13 @@ impl Space {
         self.width
     }
 
-    /// fn get_xmin
+    /// fn get data xmin
     pub fn get_xmin(&self) -> f64 {
         self.xmin
     }
 
     pub fn get_origin(&self) -> f64 {
-        self.xmin * (1. - self.margin)
+        self.origin
     }
 
     pub fn dump(&self) {
@@ -973,7 +974,7 @@ where
         let best_cell0: Vec<BestCell0> = best_cell0_contribution.into_values().collect();
         let mut best_cell0_higher_l = HashMap::<Vec<u16>, (u16, usize)>::new();
         for bc0 in best_cell0 {
-            log::debug!("bc0 : {:?}", bc0);
+            log::trace!("bc0 (index at 0, layer, benefit): {:?}", bc0);
             if let Some(l_and_benefit) = best_cell0_higher_l.get_mut(&bc0.0) {
                 // higher l ?
                 if bc0.1 > l_and_benefit.0 {
@@ -988,7 +989,7 @@ where
         // we can collect BenefitUnit and sort them
         let mut benefits = Vec::<BenefitUnit>::with_capacity(best_cell0_higher_l.len());
         for bc0_l in best_cell0_higher_l {
-            log::debug!("bc0l : {:?}", bc0_l);
+            log::trace!("bc0l (index at 0, layer, benefit): {:?}", bc0_l);
             let benefit = BenefitUnit::new(bc0_l.0, bc0_l.1 .0, bc0_l.1 .1);
             benefits.push(benefit);
         }
@@ -996,7 +997,11 @@ where
             unitb.benefit.partial_cmp(&unita.benefit).unwrap()
         });
         log::info!("benefits vector size : {}", benefits.len());
-
+        if log::log_enabled!(log::Level::Debug) {
+            for (_, unit) in benefits.iter().enumerate().take(100) {
+                log::debug!(" id : {:?} , benef : {}", unit.get_id(), unit.get_benefit());
+            }
+        }
         //
         log::info!("exiting compute_benefits");
         let cpu_time: Duration = cpu_start.elapsed();
@@ -1145,13 +1150,13 @@ where
     let dump_size = 100;
     log::info!("dumping first {} units", dump_size);
     for (rank, unit) in benefits.iter().enumerate().take(dump_size) {
-        log::debug!("\n unit rank {}, {:?}", rank, unit);
+        log::debug!("\n\n unit rank {}, {:?}", rank, unit);
         let cell_idx0 = unit.get_cell_idx();
         let cell = spacemesh.get_cell(cell_idx0, 0).unwrap();
         let center = spacemesh.get_cell_center(cell_idx0, 0).unwrap();
         log::debug!("nb point : {}", cell.get_nb_points());
         if log::log_enabled!(log::Level::Debug) {
-            println!("center : ");
+            print!("\n center : ");
             for x in center {
                 print!(" {:.3e}", x);
             }
