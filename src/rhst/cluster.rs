@@ -90,7 +90,7 @@ impl ClusterResult {
 
     #[cfg_attr(doc, katexit::katexit)]
     /// cost returned is
-    /// $ 1./N * \sum_{1}^{N}  ||x_{i} - C(x_{i})||^{2} $ where $C(x_{i})$ is the nearest cluster center for $ x_{i}$
+    /// $ 1./N * \sum_{1}^{N}  ||x_{i} - C(x_{i})|| $ where $C(x_{i})$ is the nearest cluster center for $ x_{i}$
     pub fn compute_cost<T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign>(
         &self,
         points: &[&Point<T>],
@@ -230,8 +230,6 @@ where
             let mut to_dim = nb_cluster.ilog(2).min(to_dim_tmp) as usize;
             if reduced_dim > 0 {
                 to_dim = to_dim.min(reduced_dim);
-            } else {
-                to_dim = reduced_dim;
             }
             log::info!("reducing dimension from : {} to : {}", dim, to_dim);
             // we reduce dimension
@@ -268,7 +266,7 @@ where
         //
         spacemesh.summary();
 
-        let filtered_benefits = spacemesh.compute_benefits(2);
+        let filtered_benefits = spacemesh.compute_benefits(1);
         if log::log_enabled!(log::Level::Trace) {
             log::trace!(
                 "dump of filtered_benefits, nbunits : {}",

@@ -749,7 +749,7 @@ where
             );
             let nbpt_by_cell: f64 =
                 self.get_nb_points() as f64 / self.layers[l].get_nb_cells() as f64;
-            if nbpt_by_cell <= 2. {
+            if nbpt_by_cell <= 1.001 {
                 log::warn!(
                     "too many layers asked, nb points by cell : {:.3e}",
                     nbpt_by_cell
