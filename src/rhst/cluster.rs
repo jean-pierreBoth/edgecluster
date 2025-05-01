@@ -274,7 +274,9 @@ where
             );
             dump_benefits(&spacemesh, &filtered_benefits);
         }
-        check_benefits_cover(&spacemesh, &filtered_benefits);
+        if log::log_enabled!(log::Level::Debug) {
+            check_benefits_cover(&spacemesh, &filtered_benefits);
+        }
         //
         // we have benefits, we can try to cluster
         //

@@ -1,4 +1,4 @@
-//! contingency table
+//! This module implements various mutual information from contingency table computation
 
 use indexmap::IndexSet;
 use ndarray::{Array1, Array2};
@@ -232,12 +232,32 @@ where
     /// compute normalized mutual information sqrt version
     /// returns $ \frac{I(C_{1}, C_{2}) }{\sqrt{ H(C_{1}) * H(C_{2})} } $   
     /// Note that : $ 1. - \frac{I(C_{1}, C_{2})}{\sqrt{H(C_{1}) * H(C_{2})} } $ is not a metric.
+    /// The function logs as info lower bound of the adjusted value. For large number of data, the correction is negligible
     pub fn get_nmi_sqrt(&self) -> f64 {
-        self.information_12 / (self.entropy_1 * self.entropy_2).sqrt()
+        let nmi = self.information_12 / (self.entropy_1 * self.entropy_2).sqrt();
+        let iup = self.information_12_expectation_upper();
+        let ami = (self.information_12 - iup) / ((self.entropy_1 * self.entropy_2).sqrt() - iup);
+        log::info!("adjusted nmi_sqrt will be greater than : {:.3e}", ami);
+        nmi
     }
 
+    /// computes upper bound for cross informaion, valid for large n
+    /// See Th 7 from [Vinh 2010](https://jmlr.csail.mit.edu/papers/volume11/vinh10a/vinh10a.pdf)
+    pub fn information_12_expectation_upper(&self) -> f64 {
+        let n: usize = self.clusters1.get_nb_points()
+            + self.clusters1.get_nb_cluster() * self.clusters2.get_nb_cluster()
+            - self.clusters1.get_nb_cluster()
+            - self.clusters2.get_nb_cluster();
+        let d: usize = self.clusters1.get_nb_points() - 1;
+        (n as f64 / d as f64).ln()
+    }
+
+    /// returns for now an upper bound
     pub fn information_12_expectation(&self) -> f64 {
-        panic!("not yet implemented")
+        let bound = self.information_12_expectation_upper();
+        log::info!("an upper bound is {:.3e}", bound);
+        log::info!("not yet implemented");
+        bound
     }
 } // end of Contingency
 

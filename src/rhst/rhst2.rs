@@ -1044,7 +1044,7 @@ where
         benefits
     } // end of compute_benefits_2
 
-    #[allow(unused)]
+    /// builds a partition of size p_size from sorted benefits
     pub(crate) fn get_partition(
         &self,
         p_size: usize,
@@ -1057,7 +1057,7 @@ where
             nb_points,
             p_size
         );
-        let mut clusters = DashMap::<PointId, u32>::with_capacity(nb_points);
+        let clusters = DashMap::<PointId, u32>::with_capacity(nb_points);
         //
         let loop_min_size = p_size.min(benefit_units.len());
         for i in 0..loop_min_size {
@@ -1086,7 +1086,7 @@ where
             );
             let points = unit_cell.get_points().unwrap();
             // what is exclusively in unit i and not in sub-sequent units
-            let mut nbpoint_i = AtomicUsize::new(0);
+            let nbpoint_i = AtomicUsize::new(0);
             points.par_iter().for_each(|point| {
                 let mut j = i + 1;
 
