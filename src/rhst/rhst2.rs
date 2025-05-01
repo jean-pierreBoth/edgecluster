@@ -2,10 +2,17 @@
 
 //! This is a small rhst implementation as described in Cohen-Addad paper
 //
+// NOTE: our implementation grows splitting tree with ascending layer num.
+//       So we can stop when we have one point by cell naturally while layer 0 always remins the coarser
+//       layer with only one cell which covers the whole mesh.
+//
 // We prefer rhst over cover trees as described in
 //  TerraPattern: A Nearest Neighbor Search Service (2019)
 //  Zaheer, Guruganesh, Levin Smola
 //  as we can group points very close (under lower distance threshold) in one cell
+//
+// TODO: We must be able to have more than 16 layers, to be able to have cell indexed
+// go beyond 2^16 so we need to encode cell indexes in a u32!
 
 use cpu_time::ProcessTime;
 use std::time::{Duration, SystemTime};
@@ -179,7 +186,6 @@ where
     T: Float + Debug + std::fmt::LowerExp,
 {
     pub fn new(space: &'a Space, layer: u16, index: Vec<u16>) -> Self {
-        assert!((layer as usize) <= space.nb_layer);
         Cell {
             space,
             layer,
@@ -238,18 +244,18 @@ where
     }
     // get parent cell in splitting process
     #[allow(unused)]
-    pub(crate) fn get_upper_cell_index(&self) -> Vec<u16> {
-        assert!(self.layer as usize != self.space.nb_layer - 1);
+    pub(crate) fn get_parent_cell_index(&self) -> Vec<u16> {
+        assert!(self.layer > 0);
         self.index.iter().map(|x| x / 2).collect::<Vec<u16>>()
     }
 
-    // get parent cell at layer l in splitting process
-    pub(crate) fn get_upper_cell_index_at_layer(&self, l: u16) -> Vec<u16> {
-        assert!(self.layer < l && (l as usize) < self.space.nb_layer);
-        // compute new index by dividing by 2_u16.pow((l - self.layer) as u32);
+    // get parent cell at layer l in splitting process, largest cell is down
+    pub(crate) fn get_larger_cell_index_at_layer(&self, l: u16) -> Vec<u16> {
+        assert!(self.layer > l && self.layer - l <= 15);
+        // compute new index by dividing by 2_u16.pow((self.layer -l) as u32);
         self.index
             .iter()
-            .map(|x| x >> (l - self.layer))
+            .map(|x| x >> (self.layer - l))
             .collect::<Vec<u16>>()
     }
 
@@ -276,11 +282,9 @@ where
     }
 
     // given layer and index in mesh, returns cooridnates of center of mesh in space
-    // at upper layer cell width is space width divided by 2 and so on
+    // at coarser (pareint in splitting) layer cell width is space width divided by 2 and so on
     fn get_cell_center(&self) -> Vec<f64> {
-        let exponent: u32 = (self.space.nb_layer - 1 - self.layer as usize)
-            .try_into()
-            .unwrap();
+        let exponent: u32 = self.layer as u32;
         let cell_width = self.space.get_mesh_width() / (2u32.pow(exponent) as f64);
         let origin = self.space.get_origin();
         let position: Vec<f64> = (0..self.space.dim)
@@ -291,6 +295,7 @@ where
     } // end of get_cell_center
 
     // This function parse points and allocate a subcell when a point requires it.
+    // recall the tree grow upward. finer mesh is last layer, contrary to the paper
     fn split(&self) -> Option<Vec<Cell<'a, T>>> {
         //
         assert!(self.layer < u16::MAX);
@@ -320,7 +325,7 @@ where
                 cell.add_point(point);
             } else {
                 let mut new_cell: Cell<T> =
-                    Cell::new(self.space, self.layer - 1, split_index.clone());
+                    Cell::new(self.space, self.layer + 1, split_index.clone());
                 new_cell.add_point(point);
                 hashed_cells.insert(split_index.clone(), new_cell);
             }
@@ -382,6 +387,7 @@ where
         //
         assert!(!cells.is_empty());
         for cell in cells {
+            assert_eq!(cell.layer, self.get_layer());
             self.hcells.insert(cell.index.clone(), cell);
         }
         assert!(!self.hcells.is_empty());
@@ -498,11 +504,12 @@ impl BenefitUnit {
     }
 
     // recall index in benefit unit are obtained from layer 0 cells
-    pub(crate) fn get_index_at_layer(&self) -> Vec<u16> {
-        // compute new index by dividing by 2_u16.pow((l) as u32);
+    pub(crate) fn get_index_at_layer(&self, nb_layer: u16) -> Vec<u16> {
+        let shift = nb_layer - 1 - self.layer;
+        // compute new index by dividing by 2_u16.pow((shift) as u32);
         self.cell_index
             .iter()
-            .map(|x| x >> self.layer)
+            .map(|x| x >> shift)
             .collect::<Vec<u16>>()
     }
 } // end impl BenefitUnit
@@ -523,8 +530,6 @@ impl BenefitUnit {
 /// and points are dispatched in new (smaller) cells.
 pub struct SpaceMesh<'a, T: Float> {
     space: &'a Space,
-    // leaves are at 0, root node will be above layer_max (at fictitious level nb_layers)
-    layer_max: u16,
     // layers are stored in vector according to their layer num
     layers: Vec<Layer<'a, T>>,
     //
@@ -571,11 +576,10 @@ where
             );
         };
 
-        space.nb_layer = recommended_nb_layer;
         //
         log::info!(
-            "\n ******************************************* \n setting nb layer to {}, min cell diamter : {:.3e}\n",
-            space.nb_layer,
+            "\n ******************************************* \n setting recommanded nb layer to {}, min cell diamter : {:.3e}\n",
+            recommended_nb_layer,
             space.mindist.unwrap()
         );
         //
@@ -583,7 +587,6 @@ where
         //
         SpaceMesh {
             space,
-            layer_max: (space.nb_layer - 1) as u16,
             layers,
             points: Some(points),
         }
@@ -603,19 +606,15 @@ where
         self.space.get_mesh_width()
     }
 
+    pub fn get_cell_width(&self, l: u16) -> f64 {
+        self.space.get_mesh_width() / 2_u32.pow(l as u32) as f64
+    }
+
     pub fn get_nb_points(&self) -> usize {
         match &self.points {
             Some(vec) => vec.len(),
             _ => 0,
         }
-    }
-    /// returns maximum layer , or layer of root node
-    pub fn get_root_layer(&self) -> u16 {
-        self.layer_max
-    }
-
-    pub fn get_layer_max(&self) -> u16 {
-        self.layer_max
     }
 
     pub(crate) fn get_layer(&self, l: u16) -> &Layer<'a, T> {
@@ -623,7 +622,7 @@ where
     }
 
     pub fn get_nb_layers(&self) -> usize {
-        self.layer_max as usize + 1
+        self.layers.len()
     }
 
     /// returns minimum distance detectable by mesh
@@ -636,9 +635,9 @@ where
         self.layers[layer].get_nb_cells()
     }
 
-    /// return index in mesh of a cell for a point at layer l layer 0 is at finer scale
+    /// return index in mesh of a cell for a point, at layer l (layer 0 is at coarsest scale)
     pub fn get_cell_index(&self, p: &[T], l: usize) -> Vec<u16> {
-        let exp: u32 = (self.get_nb_layers() - l).try_into().unwrap();
+        let exp: u32 = l.try_into().unwrap();
         let cell_size = self.get_width() / 2_usize.pow(exp) as f64;
         let mut index = Vec::<u16>::with_capacity(self.get_dim());
         for d in 0..self.get_dim() {
@@ -651,21 +650,23 @@ where
                 panic!("negative coordinate for cell");
             }
             assert!(idx_f <= 65535.0);
-            index.push(idx_f.trunc() as u16);
+            index.push(idx_f as u16);
         }
         index
     } // end get_cell_index
 
-    /// given index of cell at 0 , compute index at layer l
-    pub fn to_upper_index(&self, index0: &[u16], l: u16) -> Vec<u16> {
-        index0.iter().map(|x| x >> l).collect()
+    /// given index of cell at finer mesh , compute index at layer l
+    pub fn to_coarser_index(&self, finest_index: &[u16], l: u16) -> Vec<u16> {
+        let layer_max: u16 = (self.get_nb_layers() - 1).try_into().unwrap();
+        let shift: u16 = layer_max - l;
+        finest_index.iter().map(|x| x >> shift).collect()
     }
 
-    /// get cell center knowing its index and layer.
+    /// get cell center knowing its finer index and layer.
     /// Returns an error if no cell corresponds to this index.
     pub fn get_cell_center(&self, idx: &[u16], l: u16) -> anyhow::Result<Vec<f64>> {
         assert!((l as usize) < self.get_nb_layers());
-        let index_l = self.to_upper_index(idx, l);
+        let index_l = self.to_coarser_index(idx, l);
         let res = self.layers[l as usize].get_cell(&index_l);
         if res.is_none() {
             return Err(anyhow!("no cell at index"));
@@ -693,17 +694,16 @@ where
         self.layers[layer as usize].get_cell(idx)
     }
 
-    /// for layer 0, the layer with the maximum number of cells,
-    /// the diameter of a cell is $$ width * \sqrt(d)/2^(nb_layer + 1 - layer)  $$
+    /// for layer at finest scale, the layer with the maximum number of cells,
+    /// the diameter of a cell is : $$ width * \sqrt(d)/2^(nb_layer + 1 - layer)  $$
     ///  - Delta max value of  extension by dimension
     ///  - d : dimension of space
     ///  - l : layer num in 0..nb_layer
     pub fn get_layer_cell_diameter(&self, layer: u16) -> f64 {
-        assert!(layer <= self.layer_max);
         //
         let cell_diameter: f64 = (self.space.get_mesh_width()
             * (self.space.get_dim() as f64).sqrt())
-            / 2_u32.pow((self.layer_max - layer) as u32) as f64;
+            / 2_u32.pow((layer) as u32) as f64;
         cell_diameter
     }
 
@@ -714,49 +714,57 @@ where
         let cpu_start = ProcessTime::now();
         let sys_now = SystemTime::now();
         // initialize layers (layer lmax to bottom layer 0
-        self.layers = Vec::with_capacity(self.get_nb_layers());
-        for l in 0..self.get_nb_layers() {
-            let layer = Layer::<T>::new(l as u16, self.get_layer_cell_diameter(l as u16));
-
-            self.layers.push(layer);
-        }
-        log::info!("SpaceMesh::embed allocated nb layers {}", self.layers.len());
+        self.layers = Vec::with_capacity(15);
+        log::info!("SpaceMesh::embed allocated by default nb layers {}", 15);
         // initialize root cell
         let center = vec![0u16; self.get_dim()];
         // root cell, it is declared above maximum layer as it is isolated...
-        let mut global_cell = Cell::<T>::new(self.space, self.get_layer_max(), center.clone());
+        let mut global_cell = Cell::<T>::new(self.space, 0u16, center.clone());
         global_cell.init_points(&self.points.as_ref().unwrap().clone());
-        let upper_layer: &Layer<'a, T> = &self.layers[self.get_layer_max() as usize];
-        upper_layer.insert_cells(vec![global_cell]);
+        let mut l = 0u16;
+        let coarser_layer = Layer::<T>::new(l as u16, self.get_layer_cell_diameter(l as u16));
+        self.layers.push(coarser_layer);
+
+        let coarser_layer: &Layer<'a, T> = &self.layers[0 as usize];
+        coarser_layer.insert_cells(vec![global_cell]);
         // now we can propagate layer downward, cells can be treated // using par_iter_mut
-        for l in (1..self.get_nb_layers()).rev() {
+        loop {
             log::info!("splitting layer : l : {}", l);
-            let lower_layer = &self.layers[l - 1];
-            // TODO: changing into_iter to into_par_iter is sufficient to get //.
-            self.layers[l]
+            let new_layer = l + 1;
+            let finer_layer = Layer::<T>::new(
+                new_layer as u16,
+                self.get_layer_cell_diameter(new_layer as u16),
+            );
+            self.layers.push(finer_layer);
+            let finer_layer = &self.layers[new_layer as usize];
+            // changing into_iter to into_par_iter is sufficient to get //.
+            self.layers[l as usize]
                 .get_hcells()
                 .into_par_iter()
                 .for_each(|cell| {
-                    assert_eq!(l, cell.get_layer());
+                    assert_eq!(l as usize, cell.get_layer());
                     if let Some(new_cells) = cell.split() {
-                        lower_layer.insert_cells(new_cells);
+                        finer_layer.insert_cells(new_cells);
                     }
                 });
             log::info!(
                 "layer {} has {} nbcells",
-                l - 1,
-                self.layers[l - 1].get_nb_cells()
+                new_layer,
+                self.layers[new_layer as usize].get_nb_cells()
             );
-            let nbpt_by_cell: f64 =
-                self.get_nb_points() as f64 / self.layers[l].get_nb_cells() as f64;
-            if nbpt_by_cell <= 1.001 {
-                log::warn!(
-                    "too many layers asked, nb points by cell : {:.3e}",
-                    nbpt_by_cell
-                );
+            if self.layers[new_layer as usize].get_nb_cells() >= self.get_nb_points() {
+                break;
+            } else {
+                if new_layer == 15 {
+                    log::info!("stopping at max layer : {}", new_layer);
+                    break;
+                }
+                l = l + 1;
+                log::info!("Spacemesh::embed , adding layer {} ", l);
             }
         }
         // debug info : dump coordianates of layer 0 origin cell
+        log::info!("got nb layers : {}", self.get_nb_layers());
         for l in 0..self.get_nb_layers() {
             let layer = self.get_layer(l as u16);
             let cell0 = layer.get_hcells().iter().nth(0).unwrap();
@@ -786,6 +794,7 @@ where
             sys_now.elapsed().unwrap().as_millis(),
             cpu_time.as_millis()
         );
+        log::debug!("exiting SpaceMesh::embed")
         //
     } // end of embed
 
@@ -836,46 +845,49 @@ where
         let sys_now = SystemTime::now();
         //
         let nb_layers = self.get_nb_layers();
+        let max_layer = (nb_layers - 1).try_into().unwrap();
         // for each cell we store potential merge benefit at each level!
         //
-        // iterate over layer 0 and upper_layers store cost and then sort benefit array in decreasing order!
-        // each cell above layer0 store the maximum BenefitUnit observed at its layer
-        let mut best_cell0_contribution = HashMap::<(Vec<u16>, u16), BenefitUnit>::new();
-        let layer0 = self.get_layer(0);
-        for cell in layer0.get_hcells().iter() {
+        // iterate over finest layer  and then coarser layers to store cost and then sort benefit array in decreasing order!
+        // each cell at coarser layer stores the maximum BenefitUnit observed at its layer
+        let mut best_finer_cell_contribution = HashMap::<(Vec<u16>, u16), BenefitUnit>::new();
+        let finest_layer = self.get_layer(max_layer);
+        for cell in finest_layer.get_hcells().iter() {
             let mut benefit_at_layer = Vec::<usize>::with_capacity(nb_layers);
             let mut previous_tree_size: usize = cell.get_subtree_size();
-            for l in 1..self.get_nb_layers() {
-                let upper_index = cell.get_upper_cell_index_at_layer(l as u16);
-                let upper_cell = self.get_layer(l as u16).get_cell(&upper_index).unwrap();
-                // we can unroll benefit computation ( and layer 0 give no benefit)
-                let benefit = 2usize.pow(l as u32) * previous_tree_size
+            for l in (0..max_layer).rev() {
+                let coarser_index = cell.get_larger_cell_index_at_layer(l as u16);
+                let coarser_cell = self.get_layer(l as u16).get_cell(&coarser_index).unwrap();
+                // we can unroll benefit computation ( and finest layer  give no benefit)
+                let delta_l = max_layer - l;
+                let benefit = 2usize.pow(delta_l as u32) * previous_tree_size
                     + benefit_at_layer.last().unwrap_or(&0);
-                let key = (upper_index, l as u16);
-                if let Some(old_best) = best_cell0_contribution.get_mut(&key) {
+                let key = (coarser_index, l as u16);
+                if let Some(old_best) = best_finer_cell_contribution.get_mut(&key) {
                     if benefit > old_best.get_benefit() {
-                        // we found a cell at layer 0 that has better benefit at this level of tree
+                        // we found a cell at finest layer  that has better benefit at this level of tree
                         *(old_best) = BenefitUnit::new(cell.key().clone(), l as u16, benefit);
                     }
                 } else {
-                    best_cell0_contribution
+                    best_finer_cell_contribution
                         .insert(key, BenefitUnit::new(cell.key().clone(), l as u16, benefit));
                 }
                 // loop update
-                previous_tree_size = upper_cell.get_subtree_size();
+                previous_tree_size = coarser_cell.get_subtree_size();
                 benefit_at_layer.push(benefit);
             }
         }
-        // now we collect for each cell at layer 0 the highest level layer > 0 at which it is the best contribution
+        // now we collect for each cell at finest layer,  the coarser level layer ( > 0 in the paper, but < max_layer in our implementation)
+        // at which it is the best contribution
         // TODO: the loop should be made //
-        let mut higher_best_cell0_contribution = HashMap::<Vec<u16>, BenefitUnit>::new();
-        for cell in layer0.get_hcells().iter() {
+        let mut higher_best_finer_layer_contribution = HashMap::<Vec<u16>, BenefitUnit>::new();
+        for cell in finest_layer.get_hcells().iter() {
             let mut best_unit: Option<&BenefitUnit> = None;
-            for l in 1..self.get_nb_layers() {
-                let upper_index = cell.get_upper_cell_index_at_layer(l as u16);
+            for l in (0..max_layer).rev() {
+                let coarser_index = cell.get_larger_cell_index_at_layer(l as u16);
                 // is this cell the best at upper_index ?
-                let key = (upper_index, l as u16);
-                if let Some(unit) = best_cell0_contribution.get(&key) {
+                let key = (coarser_index, l as u16);
+                if let Some(unit) = best_finer_cell_contribution.get(&key) {
                     let (idx, level) = unit.get_id();
                     assert_eq!(level, l as u16);
                     if idx == cell.get_cell_index() {
@@ -884,21 +896,28 @@ where
                 }
             }
             if let Some(b_unit) = best_unit {
-                higher_best_cell0_contribution
+                higher_best_finer_layer_contribution
                     .insert(cell.get_cell_index().to_vec(), b_unit.clone());
             }
         }
-        // We have now among the list of layer 0 cells that have maximum benefits, the upper layers of their contribution
+        // We have now among the list of finest_layer, cells that have maximum benefits, the coarser layers of their contribution
         // sort benefits in decreasing (!) order
         // We can transfert to a Vec<BenefitUit> as BenefitUnit stores cell0 index
         log::info!("sorting benefits");
-        let mut benefits: Vec<BenefitUnit> = higher_best_cell0_contribution.into_values().collect();
+        let mut benefits: Vec<BenefitUnit> =
+            higher_best_finer_layer_contribution.into_values().collect();
         benefits.par_sort_unstable_by(|unita, unitb| {
             unitb.benefit.partial_cmp(&unita.benefit).unwrap()
         });
         //
         log::info!("benefits vector size : {}", benefits.len());
         assert!(benefits[0].benefit >= benefits[1].benefit);
+        log::info!("benefits vector size : {}", benefits.len());
+        if log::log_enabled!(log::Level::Debug) {
+            for (_, unit) in benefits.iter().enumerate().take(100) {
+                log::debug!(" id : {:?} , benef : {}", unit.get_id(), unit.get_benefit());
+            }
+        }
         //
         log::info!("exiting compute_benefits");
         let cpu_time: Duration = cpu_start.elapsed();
@@ -913,7 +932,7 @@ where
 
     //
 
-    // compute benefits by points (in fact cells at layer 0) and layer (See algo 2 of paper and lemma 3.4)
+    // compute benefits by points (in fact cells at finest layer, at max_level in our implementation, and at level 0 in paper ) and layer (See algo 2 of paper and lemma 3.4)
     pub(crate) fn compute_benefits_2(&self) -> Vec<BenefitUnit> {
         //
         log::info!("in compute_benefits_2");
@@ -921,74 +940,85 @@ where
         let sys_now = SystemTime::now();
         //
         let nb_layers = self.get_nb_layers();
-        // for each cell we compute merge benefit at each level!
-        // keys are indexes at layer 0!
+        let max_layer = (nb_layers - 1).try_into().unwrap();
+        // for each cell at finest level we compute merge benefit at each level!
+        // keys are indexes at finest layer!
         let mut all_benefits = HashMap::<Vec<u16>, Vec<usize>>::new();
         // TODO: to be made parallel with a DashMap
-        let layer0 = self.get_layer(0);
-        for cell in layer0.get_hcells().iter() {
+        let finest_layer = self.get_layer(max_layer);
+        for cell in finest_layer.get_hcells().iter() {
             let mut benefit_layer = vec![0usize; nb_layers];
             let mut previous_tree_size: usize = cell.get_subtree_size();
-            for l in 1..self.get_nb_layers() {
-                let upper_index = cell.get_upper_cell_index_at_layer(l as u16);
+            for l in (0..max_layer).rev() {
+                let upper_index = cell.get_larger_cell_index_at_layer(l as u16);
                 let upper_cell = self.get_layer(l as u16).get_cell(&upper_index).unwrap();
-                benefit_layer[l] =
-                    2_usize.pow(l as u32) * previous_tree_size + benefit_layer[l - 1];
+                let delta_l = max_layer - l;
+                benefit_layer[l as usize] = 2_usize.pow(delta_l as u32) * previous_tree_size
+                    + benefit_layer[l as usize + 1];
                 // loop update
                 previous_tree_size = upper_cell.get_subtree_size();
             }
             all_benefits.insert(cell.get_cell_index().to_vec(), benefit_layer);
         }
         //
-        // we map cells above layer 0 (index at layer, layer) to (layer 0 cell, benefit)
-        // storing which the (index of cell at layer 0, layer of oberved benefit, benefit) providing highest benefit at l
+        // we map cells above finest layer  (index at layer, layer) to (finest layer cell, benefit)
+        // to keep track which the (index of cell at finest layer , layer of oberved benefit, benefit) provides highest benefit at l
         type CellAtL = (Vec<u16>, u16); // index at l, l
-        type BestCell0 = (Vec<u16>, u16, usize); // index at 0, layer , benefit
-                                                 //
-        let mut best_cell0_contribution = HashMap::<CellAtL, BestCell0>::new();
-        let layer0 = self.get_layer(0);
-        for cell in layer0.get_hcells().iter() {
+        type BestFinestCell = (Vec<u16>, u16, usize); // index at finest layer, layer , benefit
+                                                      //
+        let mut best_cell_at_finer_level_contribution = HashMap::<CellAtL, BestFinestCell>::new();
+        let finest_layer = self.get_layer(max_layer);
+        for cell in finest_layer.get_hcells().iter() {
             let index = cell.get_cell_index();
-            let benefit = all_benefits.get(index).unwrap();
-            for l in 1..self.get_nb_layers() {
-                let upper_index = cell.get_upper_cell_index_at_layer(l as u16);
+            let benefit = all_benefits.get(index).unwrap(); // we get benefits at all layers for this cell at finest level
+            for l in (0..max_layer).rev() {
+                let upper_index = cell.get_larger_cell_index_at_layer(l as u16);
                 let cell_l: CellAtL = (upper_index, l as u16);
-                if let Some(best_item) = best_cell0_contribution.get_mut(&cell_l) {
-                    if benefit[l] > best_item.2 {
-                        // our current cell at layer 0 has better benefit at layer l!
-                        *(best_item) = (index.to_vec(), l as u16, benefit[l]);
+                if let Some(best_item) = best_cell_at_finer_level_contribution.get_mut(&cell_l) {
+                    if benefit[l as usize] > best_item.2 {
+                        // our current cell at finest layer has better benefit at layer l!
+                        *(best_item) = (index.to_vec(), l as u16, benefit[l as usize]);
                     }
                 } else {
-                    best_cell0_contribution
-                        .insert((cell_l.0, l as u16), (index.to_vec(), l as u16, benefit[l]));
+                    best_cell_at_finer_level_contribution.insert(
+                        (cell_l.0, l as u16),
+                        (index.to_vec(), l as u16, benefit[l as usize]),
+                    );
                 }
             }
         }
         log::info!(
-            "compute_benefits. best_cell0_contribution len {}",
-            best_cell0_contribution.len()
+            "compute_benefits.  best_cell_at_finer_level_contribution len {}",
+            best_cell_at_finer_level_contribution.len()
         );
 
-        // for each cell at layer l we know from which cell 0 the best benefit originates
-        // and we keep cells in best_cell0 with the higher l
-        let best_cell0: Vec<BestCell0> = best_cell0_contribution.into_values().collect();
-        let mut best_cell0_higher_l = HashMap::<Vec<u16>, (u16, usize)>::new();
-        for bc0 in best_cell0 {
-            log::trace!("bc0 (index at 0, layer, benefit): {:?}", bc0);
-            if let Some(l_and_benefit) = best_cell0_higher_l.get_mut(&bc0.0) {
-                // higher l ?
-                if bc0.1 > l_and_benefit.0 {
-                    assert!(bc0.2 > l_and_benefit.1);
-                    // we have a higher l
-                    *(l_and_benefit) = (bc0.1, bc0.2);
+        // for each cell at layer l we know from which  finest level cell the best benefit originates
+        // and we keep cells in best_cell_at_finer_level_contribution with the LOWER!!! l
+        let best_cell_finest: Vec<BestFinestCell> = best_cell_at_finer_level_contribution
+            .into_values()
+            .collect();
+        let mut best_cell_finest_at_higher_l = HashMap::<Vec<u16>, (u16, usize)>::new();
+        for bcf in best_cell_finest {
+            log::trace!("bcf (index at 0, layer, benefit): {:?}", bcf);
+            if let Some(l_and_benefit) = best_cell_finest_at_higher_l.get_mut(&bcf.0) {
+                // lower l ?
+                if bcf.1 < l_and_benefit.0 {
+                    ////////////////                assert!(bcf.2 > l_and_benefit.1);
+                    if bcf.2 > l_and_benefit.1 {
+                        // we have a lower l
+                        *(l_and_benefit) = (bcf.1, bcf.2);
+                    } else {
+                        log::debug!("bcf {:?},l_and_benefit : {:?} ", bcf, l_and_benefit);
+                        panic!();
+                    }
                 }
             } else {
-                best_cell0_higher_l.insert(bc0.0, (bc0.1, bc0.2));
+                best_cell_finest_at_higher_l.insert(bcf.0, (bcf.1, bcf.2));
             }
         }
         // we can collect BenefitUnit and sort them
-        let mut benefits = Vec::<BenefitUnit>::with_capacity(best_cell0_higher_l.len());
-        for bc0_l in best_cell0_higher_l {
+        let mut benefits = Vec::<BenefitUnit>::with_capacity(best_cell_finest_at_higher_l.len());
+        for bc0_l in best_cell_finest_at_higher_l {
             log::trace!("bc0l (index at 0, layer, benefit): {:?}", bc0_l);
             let benefit = BenefitUnit::new(bc0_l.0, bc0_l.1 .0, bc0_l.1 .1);
             benefits.push(benefit);
@@ -1034,7 +1064,7 @@ where
             log::info!("benefit unit : {}", i);
             let unit = &benefit_units[i];
             let (_, layer) = unit.get_id();
-            let idx_l = unit.get_index_at_layer();
+            let idx_l = unit.get_index_at_layer(self.get_nb_layers() as u16);
             // get cell
             let ref_cell_opt = self.get_cell(&idx_l, layer);
             if ref_cell_opt.is_none() {
@@ -1066,7 +1096,7 @@ where
                     }
                     let unit_j = &benefit_units[j];
                     let (_, layer_j) = unit_j.get_id();
-                    let idx_j = unit_j.get_index_at_layer();
+                    let idx_j = unit_j.get_index_at_layer(self.get_nb_layers() as u16);
                     let ref_cell_j = self.get_cell(&idx_j, layer_j).unwrap();
                     if ref_cell_j.has_point(point.get_id()) {
                         break true;
@@ -1117,7 +1147,7 @@ where
     fn compute_subtree_size(&self) {
         //
         log::info!("in compute_subtree_size ");
-        for l in 0..self.get_nb_layers() {
+        for l in (0..self.get_nb_layers()).rev() {
             let layer = &self.layers[l];
             layer.get_hcells().par_iter_mut().for_each(|mut cell| {
                 cell.subtree_size = cell.points_in.as_ref().unwrap().len();
@@ -1170,13 +1200,24 @@ pub(crate) fn check_benefits_cover<T>(spacemesh: &SpaceMesh<T>, benefits: &Vec<B
 where
     T: Float + Debug + std::fmt::LowerExp + Sync,
 {
+    log::debug!("entering in check_benefits_cover");
     let mut nb_points_in: usize = 0;
     for unit in benefits {
-        let (low_idx, l) = unit.get_id();
-        let up_idx: Vec<u16> = low_idx.iter().map(|x| x >> l).collect();
-        let cell = spacemesh.get_layer(l).get_cell(&up_idx).unwrap();
-        assert!(cell.get_nb_points() > 0);
-        nb_points_in += cell.get_nb_points();
+        let (finer_idx, l) = unit.get_id();
+        let shift = spacemesh.get_nb_layers() - 1 - l as usize;
+        let up_idx: Vec<u16> = finer_idx.iter().map(|x| x >> shift).collect();
+        if let Some(cell) = spacemesh.get_layer(l).get_cell(&up_idx) {
+            assert!(cell.get_nb_points() > 0);
+            nb_points_in += cell.get_nb_points();
+        } else {
+            log::error!(
+                "spacemesh benefit unit {:?}  cannot find its cell, up_idx : {:?}, nb_points found {}",
+                unit,
+                up_idx,
+                nb_points_in,
+            );
+            panic!();
+        }
     }
     log::info!("nb points referenced in benefits : {}", nb_points_in);
     log::info!("nb points in space : {}", spacemesh.get_nb_points());
@@ -1237,29 +1278,42 @@ mod tests {
         log_init_test();
         log::info!("in test_uniform_random");
         //
-        let nbvec = 1_000_000usize;
-        let dim = 10;
+        let nbvec = 1_000usize;
+        let dim = 5;
         let width: f64 = 1000.;
         let mindist = 5.;
-        let unif_01 = Uniform::<f64>::new(0., width).unwrap();
+        let unif_width = Uniform::<f64>::new(0., width).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         let mut points: Vec<Point<f64>> = Vec::with_capacity(nbvec);
         for i in 0..nbvec {
-            let p: Vec<f64> = (0..dim).map(|_| unif_01.sample(&mut rng)).collect();
+            let p: Vec<f64> = (0..dim).map(|_| unif_width.sample(&mut rng)).collect();
             points.push(Point::<f64>::new(i, p, (i % 5).try_into().unwrap()));
         }
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         // Space definition
         let mut space = Space::new(dim, 0., width, Some(mindist));
         let mut mesh = SpaceMesh::new(&mut space, refpoints);
-        // check cell basics, center, index conversion
+
         //
         mesh.embed();
         mesh.summary();
+        // check cell basics, center, index conversion
+        let pt = points[0].get_position();
+        log::info!("locating pt : {:?}", pt);
+        for l in 0..mesh.get_nb_layers() {
+            let idx = mesh.get_cell_index(pt, l);
+            log::info!("get_cell_index pt at idx : {:?} for l : {}", idx, l);
+            let idx = mesh.get_cell_with_position(pt, l).unwrap();
+            log::info!(
+                "get_cell_with_position pt at idx : {:?} for l : {}",
+                idx.key(),
+                l
+            );
+        }
         //
         mesh.compute_subtree_size();
         //
-        let _benefits = mesh.compute_benefits(1);
+        let _benefits = mesh.compute_benefits(2);
     } //end of test_uniform_random
 
     #[test]
@@ -1319,12 +1373,12 @@ mod tests {
         mesh.embed();
         mesh.summary();
         //
-        let _benefits = mesh.compute_benefits(1);
+        let _benefits = mesh.compute_benefits(2);
         // check number of points for cell at origin
         log::info!("number of points at orgin 0.001 .... 0.001]");
         let p = vec![0.001; dim];
         log::info!("cells info for p : {:?}", p);
-        for l in (0..mesh.get_layer_max() as usize).rev() {
+        for l in 0..mesh.get_nb_layers() {
             if let Some(cell) = mesh.get_cell_with_position(&p, l) {
                 let nbpoints_in = cell.value().get_nb_points();
                 log::info!(
