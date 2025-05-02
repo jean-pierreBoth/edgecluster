@@ -538,7 +538,7 @@ pub struct SpaceMesh<'a, T: Float> {
 
 impl<'a, T> SpaceMesh<'a, T>
 where
-    T: Float + Debug + std::fmt::LowerExp + Sync,
+    T: Float + Debug + std::fmt::LowerExp + std::ops::AddAssign + std::ops::DivAssign + Sync,
 {
     /// define Space.
     /// - data points to cluster
@@ -748,7 +748,7 @@ where
                     }
                 });
             log::info!(
-                "layer {} has {} nbcells",
+                "Spacemesh::embed ,layer {} has {} nbcells",
                 new_layer,
                 self.layers[new_layer as usize].get_nb_cells()
             );
@@ -760,7 +760,6 @@ where
                     break;
                 }
                 l = l + 1;
-                log::info!("Spacemesh::embed , adding layer {} ", l);
             }
         }
         // debug info : dump coordianates of layer 0 origin cell
@@ -771,14 +770,14 @@ where
             let cell0_idx = cell0.get_cell_index();
             let cell0_center = cell0.get_cell_center();
             assert!(!cell0_center.is_empty());
-            log::info!(
+            log::debug!(
                 "\n layer : {}, cell diameter {:.3e}",
                 l,
                 layer.get_diameter()
             );
-            log::info!("index of first (in iterator) cell : {:?}", cell0_idx);
-            if cell0_center.len() <= 20 || log::log_enabled!(log::Level::Debug) {
-                log::info!("coordinates of first cell center : ");
+            log::debug!("index of first (in iterator) cell : {:?}", cell0_idx);
+            if cell0_center.len() <= 20 && log::log_enabled!(log::Level::Debug) {
+                log::debug!("coordinates of first cell center : ");
                 for c in cell0_center {
                     print!(" {:.3e}", c);
                 }
@@ -1049,7 +1048,7 @@ where
         &self,
         p_size: usize,
         benefit_units: &[BenefitUnit],
-    ) -> DashMap<PointId, u32> {
+    ) -> (DashMap<PointId, u32>, DashMap<usize, PointId>) {
         //
         let nb_points = self.get_nb_points();
         log::info!(
@@ -1058,10 +1057,11 @@ where
             p_size
         );
         let clusters = DashMap::<PointId, u32>::with_capacity(nb_points);
+        let centers = DashMap::<usize, PointId>::with_capacity(p_size);
         //
         let loop_min_size = p_size.min(benefit_units.len());
         for i in 0..loop_min_size {
-            log::info!("benefit unit : {}", i);
+            log::debug!("in SpaceMesh::get_partition benefit unit : {}", i);
             let unit = &benefit_units[i];
             let (_, layer) = unit.get_id();
             let idx_l = unit.get_index_at_layer(self.get_nb_layers() as u16);
@@ -1126,6 +1126,10 @@ where
                         point.get_position(),
                         i
                     );
+                    // store center
+                    if centers.get(&i).is_none() {
+                        centers.insert(i, point.get_id());
+                    }
                 } // end !found
                 let old = nbpoint_i.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if log::log_enabled!(log::Level::Debug) && old % 10000 == 0 {
@@ -1139,14 +1143,54 @@ where
             clusters.len()
         );
         //
-        clusters
+        assert_eq!(centers.len(), p_size);
+        if log::log_enabled!(log::Level::Debug) {
+            log::info!("nb points : {}", self.get_nb_points());
+            let cost = self.compute_medoid_cost(&clusters, &centers);
+            log::debug!("compute_medoid_cost from partition : {:.3e}", cost);
+        }
+        //
+        (clusters, centers)
+    }
+
+    // cluster_center gives for a cluster rank, the rank of the point in self.points
+    // pt_affectation gives for each point its cluster num
+    pub(crate) fn compute_medoid_cost(
+        &self,
+        pt_affectation: &DashMap<usize, u32>,
+        cluster_center: &DashMap<usize, usize>,
+    ) -> f64 {
+        assert_eq!(self.get_nb_points(), pt_affectation.len());
+
+        let mut norm = T::zero();
+        let points = self.points.as_ref().unwrap();
+        log::info!("dimension : {}", points[0].get_dimension());
+        for point in points.iter() {
+            let xyz = point.get_position();
+            let cluster_rank = *pt_affectation.get(&point.get_id()).unwrap().value() as usize;
+            let center_rank = *cluster_center.get(&cluster_rank).unwrap().value();
+            let center_pt = points[center_rank].get_position();
+            let dist = xyz
+                .iter()
+                .zip(center_pt)
+                .fold(T::zero(), |acc, (p, c)| (acc + (*p - *c).abs()));
+            log::trace!(
+                "point : {},  center : {}, dist : {:.3e}",
+                point.get_id(),
+                center_rank,
+                dist.to_f64().unwrap()
+            );
+            norm += dist;
+        }
+        norm /= T::from(points.len()).unwrap();
+        norm.to_f64().unwrap()
     }
 
     // we need to compute cardinal of each subtree (all descendants of each cell)
     // just dispatch number of points
     fn compute_subtree_size(&self) {
         //
-        log::info!("in compute_subtree_size ");
+        log::debug!("in compute_subtree_size ");
         for l in (0..self.get_nb_layers()).rev() {
             let layer = &self.layers[l];
             layer.get_hcells().par_iter_mut().for_each(|mut cell| {
@@ -1154,7 +1198,7 @@ where
             });
             self.get_subtree_size(l as u16);
         }
-        log::info!("exiting compute_subtree_size ");
+        log::debug!("exiting compute_subtree_size ");
     } // end of compute_subtree_cardinals
 
     // sum of sub tree size as seen from layer l. Used for debugging purpose
@@ -1175,7 +1219,7 @@ where
 
 pub(crate) fn dump_benefits<T>(spacemesh: &SpaceMesh<T>, benefits: &[BenefitUnit])
 where
-    T: Float + Debug + std::fmt::LowerExp + Sync,
+    T: Float + Debug + std::fmt::LowerExp + std::ops::AddAssign + std::ops::DivAssign + Sync,
 {
     let dump_size = 100;
     log::info!("dumping first {} units", dump_size);
@@ -1198,7 +1242,7 @@ where
 // we check we have a partition
 pub(crate) fn check_benefits_cover<T>(spacemesh: &SpaceMesh<T>, benefits: &Vec<BenefitUnit>)
 where
-    T: Float + Debug + std::fmt::LowerExp + Sync,
+    T: Float + Debug + std::fmt::LowerExp + std::ops::AddAssign + std::ops::DivAssign + Sync,
 {
     log::debug!("entering in check_benefits_cover");
     let mut nb_points_in: usize = 0;

@@ -141,9 +141,10 @@ where
     /// This algorithm requires the data to have a small dimension (<= ~10).  
     /// It is possible to specify an algorithm to reduce data dimension and a target dimension (See [smalld](crate::smalld)).  
     /// If not, the algorithm will try to choose one.
+    /// NOTA: As points are passed as a Vec, the PointId identificor of a Point must be its rank!
     pub fn new(points: Vec<&'a Point<T>>, reducer: Option<&'a dyn reducer::Reducer<T>>) -> Self {
         //
-        log::info!("entering Hcluster::new");
+        log::info!("entering Hcluster::new, nb_points : {}", points.len());
         // construct space
         let (xmin, xmax) = points
             .iter()
@@ -280,10 +281,18 @@ where
         //
         // we have benefits, we can try to cluster
         //
-        let cluster_hash = spacemesh.get_partition(nb_cluster, &filtered_benefits);
+        let (point_to_cluster, cluster_to_pid) =
+            spacemesh.get_partition(nb_cluster, &filtered_benefits);
+        let medoid_cost = self.compute_medoid_cost(&point_to_cluster, &cluster_to_pid);
+        log::info!("medoid cost in original space  : {:.3e}", medoid_cost);
+        //
         let mut clusters: Vec<Vec<usize>> = (0..nb_cluster).map(|_| Vec::<usize>::new()).collect();
-        for item in cluster_hash.iter() {
+        for item in point_to_cluster.iter() {
             clusters[*item.value() as usize].push(*item.key());
+        }
+        let mut centers_pid = vec![0usize; self.points.len()];
+        for item in cluster_to_pid {
+            centers_pid[item.0] = item.1;
         }
         //
         println!(
@@ -292,7 +301,37 @@ where
             cpu_start.elapsed().as_secs()
         );
         //
-        ClusterResult::new(cluster_hash, clusters)
+        ClusterResult::new(point_to_cluster, clusters)
+    }
+
+    // cluster_center gives for a cluster rank, the rank of the point in self.points
+    pub(crate) fn compute_medoid_cost(
+        &self,
+        pt_affectation: &DashMap<usize, u32>,
+        cluster_center: &DashMap<usize, usize>,
+    ) -> f64 {
+        assert_eq!(self.points.len(), pt_affectation.len());
+
+        let mut norm = T::zero();
+        log::info!("dimension : {}", self.points[0].get_dimension());
+        for point in self.points.iter() {
+            let xyz = point.get_position();
+            let cluster_rank = *pt_affectation.get(&point.get_id()).unwrap().value() as usize;
+            let center_rank = *cluster_center.get(&cluster_rank).unwrap().value();
+            let center_pt = self.points[center_rank].get_position();
+            let dist = xyz.iter().zip(center_pt).fold(T::zero(), |acc, (p, c)| {
+                acc + num_traits::Float::abs(*p - *c)
+            });
+            log::trace!(
+                "point : {},  center : {}, dist : {:.3e}",
+                point.get_id(),
+                center_rank,
+                dist.to_f64().unwrap()
+            );
+            norm += dist;
+        }
+        norm /= T::from(self.points.len()).unwrap();
+        norm.to_f64().unwrap()
     }
 
     // return a vector of points with reduced data dimension, label and id preserved

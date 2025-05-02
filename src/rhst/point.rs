@@ -9,7 +9,7 @@ pub type PointId = usize;
 
 #[derive(Debug, Clone)]
 pub struct Point<T> {
-    // id to identify points as coming from external client
+    // id to identify points as coming from external client.
     id: PointId,
     /// data point
     p: Vec<T>,
@@ -21,6 +21,7 @@ impl<T> Point<T>
 where
     T: Float + Debug,
 {
+    ///
     pub fn new(id: PointId, p: Vec<T>, label: u32) -> Self {
         Point { id, p, label }
     }

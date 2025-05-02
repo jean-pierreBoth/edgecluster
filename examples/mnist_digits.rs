@@ -121,7 +121,7 @@ pub fn main() {
     let sys_now = SystemTime::now();
     // distance is normalized by pixel. Value of pixel between 0 and 256
     //===================================
-    let nb_cluster_asked = 20;
+    let nb_cluster_asked = 10;
     let _mindist = Some(0.002);
     let _small_dim = Some(15);
     //===================================
