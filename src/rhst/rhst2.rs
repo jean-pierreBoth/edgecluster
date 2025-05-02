@@ -878,7 +878,7 @@ where
         }
         // now we collect for each cell at finest layer,  the coarser level layer ( > 0 in the paper, but < max_layer in our implementation)
         // at which it is the best contribution
-        // TODO: the loop should be made //
+        // TODO: the loop should be made // but for Mnist 70000 pts useless
         let mut higher_best_finer_layer_contribution = HashMap::<Vec<u16>, BenefitUnit>::new();
         for cell in finest_layer.get_hcells().iter() {
             let mut best_unit: Option<&BenefitUnit> = None;
@@ -918,7 +918,7 @@ where
             }
         }
         //
-        log::info!("exiting compute_benefits");
+        log::debug!("exiting compute_benefits_1");
         let cpu_time: Duration = cpu_start.elapsed();
         println!(
             " compute_benefits sys time(ms) {:?} cpu time {:?}",

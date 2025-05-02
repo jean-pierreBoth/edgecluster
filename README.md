@@ -1,10 +1,23 @@
- "Some recents edge hierarchical clustering"
+# h-clustering
 
-This crate (will) provide implementation of 2  hierarchical clustering algorithms
+This crate is dedicated to recent hierarchical k-median clustering. It is related to the crate [coreset](https://crates.io/crates/hnsw_rs).
 
-- Parallel and Efficient Hierarchical k-Median Clustering 
-  V Cohen-Addad S. Lattanzi et al. 2021 [VL](https://dl.acm.org/doi/10.5555/3540261.3541816)
+For now we provide an implementation of:
 
-- Online hierarchical clustering approximations.   
-    A. Rajagopalan A.K Mean et al 2019.
-    Online hierarchical clustering approximations [AM](https://arxiv.org/abs/1909.09667)
+1) Parallel and Efficient Hierarchical k-Median Clustering 
+  V Cohen-Addad S. Lattanzi et al. 2021 [CAL](https://dl.acm.org/doi/10.5555/3540261.3541816)
+
+
+## Introduction
+
+1) 
+## Results
+
+## License
+
+Licensed under either of
+
+* Apache License, Version 2.0, [LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>
+* MIT license [LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>
+
+at your option.
