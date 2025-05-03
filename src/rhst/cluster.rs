@@ -124,7 +124,7 @@ pub struct Hcluster<'a, T> {
     //
     points: Vec<&'a Point<T>>,
     //
-    mindist: Option<f64>,
+    auto_dim: bool,
     //
     reducer: Option<&'a dyn reducer::Reducer<T>>,
     // dimension of reduced points if reduction was used
@@ -138,10 +138,13 @@ where
     T: Float + std::fmt::Debug + Sync + Send + Lapack + ndarray::ScalarOperand,
     StandardNormal: Distribution<T>,
 {
-    /// This algorithm requires the data to have a small dimension (<= ~10).  
-    /// It is possible to specify an algorithm to reduce data dimension and a target dimension (See [smalld](crate::smalld)).  
-    /// If not, the algorithm will try to choose one.
-    /// NOTA: As points are passed as a Vec, the PointId identificor of a Point must be its rank!
+    /// Constructs a structure to cluster the points given in arguments.  
+    /// By default the dimension of data is respected, but it is possible to reduce this dimension.
+    /// The module [smalld](crate::smalld) provides for this.  
+    /// The user can also provide its own dimension reduction algorithm with the argument given as an option.
+    /// If not, the algorithm will try to choose one.  
+    ///
+    /// NOTA: As points are passed as a Vec, the PointId identificator of a Point must be its rank!
     pub fn new(points: Vec<&'a Point<T>>, reducer: Option<&'a dyn reducer::Reducer<T>>) -> Self {
         //
         log::info!("entering Hcluster::new, nb_points : {}", points.len());
@@ -155,6 +158,8 @@ where
         //
         let xmin: f64 = xmin.to_f64().unwrap();
         let xmax: f64 = xmax.to_f64().unwrap();
+        //
+        let auto_dim = false;
         // construct spacemesh
         let dim = points[0].get_dimension();
 
@@ -171,7 +176,7 @@ where
         Hcluster {
             debug_level: 0,
             points,
-            mindist: None,
+            auto_dim,
             reducer,
             reduced_dim: None,
             reduced_points: None,
@@ -195,19 +200,24 @@ where
     pub fn get_data_dim(&self) -> usize {
         self.points[0].get_dimension()
     }
-    //
+
+    /// The function that triggers the clustering.  
+    /// The arguments are:  
+    /// - number of clusters asked for
+    /// - auto_dim : set to true, the algorithm will try to reduce data dimension using module [crate::smalld]
+    /// - if a reduction  to a given dimension is necessary, this option will use it.
     /// The function returns a map giving for each point id its cluster
     pub fn cluster(
         &mut self,
         nb_cluster: usize,
-        mindist: Option<f64>,
+        auto_dim: bool,
         reduced_dim_opt: Option<usize>,
     ) -> ClusterResult {
         //
         let cpu_start = ProcessTime::now();
         let sys_now = SystemTime::now();
         // construct space
-        self.mindist = mindist;
+        self.auto_dim = auto_dim;
         let (xmin, xmax) = self
             .points
             .iter()
@@ -226,7 +236,7 @@ where
             Some(d) => d,
             _ => 0,
         };
-        if dim > self.points.len().ilog(2) as usize || reduced_dim > 0 {
+        if (dim > self.points.len().ilog(2) as usize && self.auto_dim) || reduced_dim > 0 {
             let to_dim_tmp = 10.min(self.points.len().ilog(2) / 2);
             let mut to_dim = nb_cluster.ilog(2).min(to_dim_tmp) as usize;
             if reduced_dim > 0 {
@@ -242,6 +252,7 @@ where
                 .iter()
                 .collect::<Vec<&Point<T>>>();
         } else {
+            log::info!("clustering keeping original dimension: {} ", dim);
             points_to_cluster = self.points.clone();
         }
         // we have points_to_cluster , we can construct space
@@ -257,7 +268,7 @@ where
         let dim = points_to_cluster[0].get_dimension();
         log::info!("dim : {}, xmin : {:.3e}, xmax : {:.3e}", dim, xmin, xmax);
         // construct spacemesh
-        let mut space = Space::new(dim, xmin, xmax, mindist);
+        let mut space = Space::new(dim, xmin, xmax);
         let mut spacemesh = SpaceMesh::new(&mut space, points_to_cluster);
         spacemesh.embed();
 
@@ -387,7 +398,6 @@ mod tests {
         let nbvec = 1_00_000usize;
         let dim = 2;
         let width: f64 = 1.;
-        let mindist = 0.5;
         let unif_01 = Uniform::<f64>::new(0., width).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         let mut points: Vec<Point<f64>> = Vec::with_capacity(nbvec);
@@ -403,7 +413,8 @@ mod tests {
         //
         let mut hcluster = Hcluster::new(refpoints, None);
         hcluster.set_debug_level(1);
-        let res = hcluster.cluster(10, Some(mindist), None);
+        let auto_dim = false;
+        let res = hcluster.cluster(10, auto_dim, None);
         //
         let refpoints = hcluster.get_points();
         let centers = res.compute_cluster_center(&refpoints);
@@ -426,7 +437,6 @@ mod tests {
         let nbvec = 10_00_000usize;
         let dim = 5;
         let width: f32 = 100.;
-        let mindist = 4.;
 
         // sample with coordinates following exponential law
         let law = Exp::<f32>::new(50. / width as f32).unwrap();
@@ -444,7 +454,8 @@ mod tests {
         // Space definition
         //
         let mut hcluster = Hcluster::new(refpoints, None);
-        let res = hcluster.cluster(10, Some(mindist), None);
+        let auto_dim = false;
+        let res = hcluster.cluster(10, auto_dim, None);
         //
         let refpoints = hcluster.get_points();
         let centers = res.compute_cluster_center(&refpoints);
