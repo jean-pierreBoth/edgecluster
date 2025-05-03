@@ -161,7 +161,11 @@ pub fn main() {
             );
         }
     }
-    println!("global cost : {:.3e}", cluster_res.compute_cost(&refpoints));
+    let _output = Some("digits_centers.csv");
+    println!(
+        "global cost : {:.3e}",
+        cluster_res.compute_cost(&refpoints, _output)
+    );
     // merit comparison
     println!("merit ctatus");
     //

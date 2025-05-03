@@ -6,8 +6,14 @@ use cpu_time::ProcessTime;
 use rand_distr::{Distribution, StandardNormal};
 use std::time::SystemTime;
 
+// io
+use csv::WriterBuilder;
+use serde::Serialize;
+use std::fs::OpenOptions;
+//
 use dashmap::DashMap;
 use lax::Lapack;
+use std::path::PathBuf;
 
 // points are assimilated to cells of layer 0. Most cells of layer 0 should have one or very few points.
 // The algorithms is translated
@@ -18,6 +24,27 @@ use super::rhst2::*;
 use crate::smalld::*;
 
 use crate::merit::affect::*;
+
+//   just to dump centers
+
+#[derive(Serialize)]
+struct CsvRecord {
+    center: Vec<f64>,
+    center_str: Vec<String>,
+}
+
+impl CsvRecord {
+    pub fn from<T: Float>(data: &Vec<T>) -> Self {
+        let center: Vec<f64> = data.iter().map(|x| x.to_f64().unwrap()).collect();
+        let center_str: Vec<String> = center.iter().map(|x| format!("{:3.3E}", x)).collect();
+        CsvRecord { center, center_str }
+    }
+
+    #[allow(unused)]
+    pub fn get_center_str_iter(&self) -> impl std::iter::Iterator<Item = &String> {
+        self.center_str.iter()
+    }
+}
 
 //===========================
 
@@ -90,10 +117,12 @@ impl ClusterResult {
 
     #[cfg_attr(doc, katexit::katexit)]
     /// cost returned is
-    /// $ 1./N * \sum_{1}^{N}  ||x_{i} - C(x_{i})|| $ where $C(x_{i})$ is the nearest cluster center for $ x_{i}$
+    /// $ 1./N * \sum_{1}^{N}  ||x_{i} - C(x_{i})|| $ where $C(x_{i})$ is the nearest cluster center for $ x_{i}$.
+    /// result will be written in a csv file with name $filename$
     pub fn compute_cost<T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign>(
         &self,
         points: &[&Point<T>],
+        dumpfile: Option<&str>,
     ) -> T {
         let centers = self.compute_cluster_center(points);
         let mut norm = T::zero();
@@ -108,6 +137,31 @@ impl ClusterResult {
                 .fold(T::zero(), |acc, (p, c)| (acc + (*p - *c).abs()));
         }
         norm /= T::from(points.len()).unwrap();
+        //
+        if let Some(csvloc) = dumpfile {
+            let mut csvpath = PathBuf::from(".");
+            csvpath.push(csvloc);
+            let csvfileres = OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(&csvpath);
+            if csvfileres.is_err() {
+                println!("compute_cost could not open file {:?}", csvpath.as_os_str());
+            }
+            let wtr = WriterBuilder::new().from_path(&csvpath);
+            if wtr.is_err() {
+                log::error!("cannot open dump csv file");
+            } else {
+                log::info!("dumping csv file in {:?}", csvpath.as_os_str());
+                let mut wtr = wtr.unwrap();
+                for c in &centers {
+                    let csv_record = CsvRecord::from(c);
+                    wtr.serialize(csv_record.center_str).unwrap();
+                }
+            }
+        }
+        //
         norm
     }
 
@@ -426,7 +480,8 @@ mod tests {
                 c
             );
         }
-        println!("global cost : {:.3e}", res.compute_cost(&refpoints));
+        let output = Some("cluster_random.csv");
+        println!("global cost : {:.3e}", res.compute_cost(&refpoints, output));
     } //end of test_cluster_random
 
     #[test]
@@ -467,7 +522,7 @@ mod tests {
                 c
             );
         }
-        println!("global cost : {:.3e}", res.compute_cost(&refpoints));
+        println!("global cost : {:.3e}", res.compute_cost(&refpoints, None));
         //
     } //end of test_cluster_exp
 } // end of tests
