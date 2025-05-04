@@ -433,6 +433,7 @@ where
 mod tests {
 
     use super::*;
+    use crate::merit::*;
 
     use rand::distr::Uniform;
     use rand::prelude::*;
@@ -448,13 +449,18 @@ mod tests {
     fn test_cluster_random() {
         log_init_test();
         log::info!("in test_cluster_random");
+        //=====================================
         // points are generated around 5 centers/labels
         let nbvec = 1_00_000usize;
         let dim = 2;
         let width: f64 = 1.;
+        let nb_cluster_asked = 10;
+        //===========================
         let unif_01 = Uniform::<f64>::new(0., width).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         let mut points: Vec<Point<f64>> = Vec::with_capacity(nbvec);
+        // We construct a  Affectation structure to compare clusters with true labels
+        let ref_hashmap = DashMap::<usize, u32>::new();
         for i in 0..nbvec {
             let label = i % 5;
             let offset = label as f64 * 15.;
@@ -462,26 +468,42 @@ mod tests {
                 .map(|_| offset + unif_01.sample(&mut rng))
                 .collect();
             points.push(Point::<f64>::new(i, p, (i % 5).try_into().unwrap()));
+            ref_hashmap.insert(i, label as u32);
         }
+        let ref_affectation = DashAffectation::new(&ref_hashmap, nb_cluster_asked);
+        // SpaceMesh construction
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
-        //
         let mut hcluster = Hcluster::new(refpoints, None);
         hcluster.set_debug_level(1);
         let auto_dim = false;
-        let res = hcluster.cluster(10, auto_dim, None);
+        let cluster_res = hcluster.cluster(10, auto_dim, None);
+        let algo_affectation = cluster_res.get_dash_affectation();
         //
         let refpoints = hcluster.get_points();
-        let centers = res.compute_cluster_center(&refpoints);
+        let centers = cluster_res.compute_cluster_center(&refpoints);
         for (i, c) in centers.iter().enumerate() {
             println!(
                 "center cluster : {},  size : {}, center : {:?}",
                 i,
-                res.get_cluster_size(i),
+                cluster_res.get_cluster_size(i),
                 c
             );
         }
         let output = Some("cluster_random.csv");
-        println!("global cost : {:.3e}", res.compute_cost(&refpoints, output));
+        println!(
+            "global cost : {:.3e}",
+            cluster_res.compute_cost(&refpoints, output)
+        );
+        println!("merit ctatus");
+        // entropy merit
+        let contingency = Contingency::<DashAffectation<usize, u32>, usize, u32>::new(
+            algo_affectation,
+            ref_affectation,
+        );
+        contingency.dump_entropies();
+        let nmi_joint: f64 = contingency.get_nmi_joint();
+        println!("results with {} clusters", nb_cluster_asked);
+        println!("nmi joint : {:.3e}", nmi_joint);
     } //end of test_cluster_random
 
     #[test]
@@ -492,11 +514,14 @@ mod tests {
         let nbvec = 10_00_000usize;
         let dim = 5;
         let width: f32 = 100.;
+        let nb_cluster_asked = 10;
 
         // sample with coordinates following exponential law
         let law = Exp::<f32>::new(50. / width as f32).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
         let mut points: Vec<Point<f32>> = Vec::with_capacity(nbvec);
+        // We construct a  Affectation structure to compare clusters with true labels
+        let ref_hashmap = DashMap::<usize, u32>::new();
         for i in 0..nbvec {
             let label = i % 5;
             let offset = label as f32 * 15. as f32;
@@ -504,25 +529,42 @@ mod tests {
                 .map(|_| offset + law.sample(&mut rng).min(width) as f32)
                 .collect();
             points.push(Point::<f32>::new(i, p, (i % 5).try_into().unwrap()));
+            ref_hashmap.insert(i, label as u32);
         }
-        let refpoints: Vec<&Point<f32>> = points.iter().map(|p| p).collect();
+        let ref_affectation = DashAffectation::new(&ref_hashmap, nb_cluster_asked);
         // Space definition
+        let refpoints: Vec<&Point<f32>> = points.iter().map(|p| p).collect();
         //
         let mut hcluster = Hcluster::new(refpoints, None);
         let auto_dim = false;
-        let res = hcluster.cluster(10, auto_dim, None);
+        let cluster_res = hcluster.cluster(10, auto_dim, None);
+        let algo_affectation = cluster_res.get_dash_affectation();
         //
         let refpoints = hcluster.get_points();
-        let centers = res.compute_cluster_center(&refpoints);
+        let centers = cluster_res.compute_cluster_center(&refpoints);
         for (i, c) in centers.iter().enumerate() {
             println!(
                 "center cluster : {},  size : {}, center : {:?}",
                 i,
-                res.get_cluster_size(i),
+                cluster_res.get_cluster_size(i),
                 c
             );
         }
-        println!("global cost : {:.3e}", res.compute_cost(&refpoints, None));
+        println!(
+            "global cost : {:.3e}",
+            cluster_res.compute_cost(&refpoints, None)
+        );
         //
+        // merit comparison
+        println!("merit ctatus");
+        //
+        let contingency = Contingency::<DashAffectation<usize, u32>, usize, u32>::new(
+            algo_affectation,
+            ref_affectation,
+        );
+        contingency.dump_entropies();
+        let nmi_joint: f64 = contingency.get_nmi_joint();
+        println!("results with {} clusters", nb_cluster_asked);
+        println!("nmi joint : {:.3e}", nmi_joint);
     } //end of test_cluster_exp
 } // end of tests

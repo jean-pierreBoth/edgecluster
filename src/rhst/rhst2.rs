@@ -804,13 +804,12 @@ where
         let finest_layer = self.get_layer(max_layer);
         for cell in finest_layer.get_hcells().iter() {
             let mut benefit_at_layer = Vec::<usize>::with_capacity(nb_layers);
-            let mut previous_tree_size: usize = cell.get_subtree_size();
             for l in (0..max_layer).rev() {
                 let coarser_index = cell.get_larger_cell_index_at_layer(l as u16);
                 let coarser_cell = self.get_layer(l as u16).get_cell(&coarser_index).unwrap();
                 // we can unroll benefit computation ( and finest layer  give no benefit)
                 let delta_l = max_layer - l;
-                let benefit = 2usize.pow(delta_l as u32) * previous_tree_size
+                let benefit = 2usize.pow(delta_l as u32) * coarser_cell.get_subtree_size()
                     + benefit_at_layer.last().unwrap_or(&0);
                 let key = (coarser_index, l as u16);
                 if let Some(old_best) = best_finer_cell_contribution.get_mut(&key) {
@@ -823,7 +822,6 @@ where
                         .insert(key, BenefitUnit::new(cell.key().clone(), l as u16, benefit));
                 }
                 // loop update
-                previous_tree_size = coarser_cell.get_subtree_size();
                 benefit_at_layer.push(benefit);
             }
         }
@@ -898,15 +896,13 @@ where
         let finest_layer = self.get_layer(max_layer);
         for cell in finest_layer.get_hcells().iter() {
             let mut benefit_layer = vec![0usize; nb_layers];
-            let mut previous_tree_size: usize = cell.get_subtree_size();
             for l in (0..max_layer).rev() {
-                let upper_index = cell.get_larger_cell_index_at_layer(l as u16);
-                let upper_cell = self.get_layer(l as u16).get_cell(&upper_index).unwrap();
+                let coarser_index = cell.get_larger_cell_index_at_layer(l as u16);
+                let coarser_cell = self.get_layer(l as u16).get_cell(&coarser_index).unwrap();
                 let delta_l = max_layer - l;
-                benefit_layer[l as usize] = 2_usize.pow(delta_l as u32) * previous_tree_size
+                benefit_layer[l as usize] = 2_usize.pow(delta_l as u32)
+                    * coarser_cell.get_subtree_size()
                     + benefit_layer[l as usize + 1];
-                // loop update
-                previous_tree_size = upper_cell.get_subtree_size();
             }
             all_benefits.insert(cell.get_cell_index().to_vec(), benefit_layer);
         }
@@ -1365,7 +1361,7 @@ mod tests {
         mesh.embed();
         mesh.summary();
         //
-        let _benefits = mesh.compute_benefits(2);
+        let _benefits = mesh.compute_benefits(1);
         // check number of points for cell at origin
         log::info!("number of points at orgin 0.001 .... 0.001]");
         let p = vec![0.001; dim];

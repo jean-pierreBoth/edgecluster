@@ -123,7 +123,7 @@ pub fn main() {
     //===================================
     let nb_cluster_asked = 20;
     let auto_dim = false;
-    let _small_dim = Some(15);
+    let _small_dim = Some(5);
     //===================================
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(ref_points, None);
@@ -134,7 +134,7 @@ pub fn main() {
     for (i, l) in labels.iter().enumerate() {
         ref_hashmap.insert(i, *l as u32);
     }
-    let ref_affectation = DashAffectation::new(&ref_hashmap, 10);
+    let ref_affectation = DashAffectation::new(&ref_hashmap, nb_cluster_asked);
     //
     let cpu_time: Duration = cpu_start.elapsed();
     println!(
@@ -161,10 +161,10 @@ pub fn main() {
             );
         }
     }
-    let _output = Some("digits_centers.csv");
+    let output = Some("digits_centers.csv");
     println!(
         "global cost : {:.3e}",
-        cluster_res.compute_cost(&refpoints, _output)
+        cluster_res.compute_cost(&refpoints, output)
     );
     // merit comparison
     println!("merit ctatus");
