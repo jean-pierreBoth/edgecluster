@@ -458,19 +458,22 @@ where
 /// benefit is benefit observed along the path from layer 0 to parent cell observed at layer l
 #[derive(Debug, Clone)]
 pub(crate) struct BenefitUnit {
-    // index in layer 0, beccause we construct benefit units from 0 to upper layers
+    // index in finest layer (layer_max), beccause we construct benefit units from upper layers down to coarsest layer (0!)
     cell_index: Vec<u16>,
     // layer corresponding to observe benefit
     layer: u16,
+    // max layer num in mesh space
+    layer_max: u16,
     // benefit encountered up to layer
     benefit: usize,
 }
 
 impl BenefitUnit {
-    pub(crate) fn new(cell_index: Vec<u16>, layer: u16, benefit: usize) -> Self {
+    pub(crate) fn new(cell_index: Vec<u16>, layer: u16, layer_max: u16, benefit: usize) -> Self {
         BenefitUnit {
             cell_index,
             layer,
+            layer_max,
             benefit,
         }
     }
@@ -491,9 +494,10 @@ impl BenefitUnit {
         self.benefit
     }
 
-    // recall index in benefit unit are obtained from layer 0 cells
-    pub(crate) fn get_index_at_layer(&self, nb_layer: u16) -> Vec<u16> {
-        let shift = nb_layer - 1 - self.layer;
+    // recall index in benefit unit are obtained from finest layer cells
+    pub(crate) fn get_index_at_layer(&self, layer: u16) -> Vec<u16> {
+        assert!(layer <= self.layer_max);
+        let shift = self.layer_max - layer;
         // compute new index by dividing by 2_u16.pow((shift) as u32);
         self.cell_index
             .iter()
@@ -572,7 +576,7 @@ where
         &self.layers[l as usize]
     }
 
-    pub fn get_nb_layers(&self) -> usize {
+    pub(crate) fn get_nb_layers(&self) -> usize {
         self.layers.len()
     }
 
@@ -804,24 +808,29 @@ where
         let finest_layer = self.get_layer(max_layer);
         for cell in finest_layer.get_hcells().iter() {
             let mut benefit_at_layer = Vec::<usize>::with_capacity(nb_layers);
+            let mut previous_tree_size: usize = cell.get_subtree_size();
             for l in (0..max_layer).rev() {
                 let coarser_index = cell.get_larger_cell_index_at_layer(l as u16);
                 let coarser_cell = self.get_layer(l as u16).get_cell(&coarser_index).unwrap();
                 // we can unroll benefit computation ( and finest layer  give no benefit)
                 let delta_l = max_layer - l;
-                let benefit = 2usize.pow(delta_l as u32) * coarser_cell.get_subtree_size()
+                let benefit = 2usize.pow(delta_l as u32) * previous_tree_size
                     + benefit_at_layer.last().unwrap_or(&0);
                 let key = (coarser_index, l as u16);
                 if let Some(old_best) = best_finer_cell_contribution.get_mut(&key) {
                     if benefit > old_best.get_benefit() {
                         // we found a cell at finest layer  that has better benefit at this level of tree
-                        *(old_best) = BenefitUnit::new(cell.key().clone(), l as u16, benefit);
+                        *(old_best) =
+                            BenefitUnit::new(cell.key().clone(), l as u16, max_layer, benefit);
                     }
                 } else {
-                    best_finer_cell_contribution
-                        .insert(key, BenefitUnit::new(cell.key().clone(), l as u16, benefit));
+                    best_finer_cell_contribution.insert(
+                        key,
+                        BenefitUnit::new(cell.key().clone(), l as u16, max_layer, benefit),
+                    );
                 }
                 // loop update
+                previous_tree_size = coarser_cell.get_subtree_size();
                 benefit_at_layer.push(benefit);
             }
         }
@@ -896,6 +905,7 @@ where
         let finest_layer = self.get_layer(max_layer);
         for cell in finest_layer.get_hcells().iter() {
             let mut benefit_layer = vec![0usize; nb_layers];
+            benefit_layer[max_layer as usize] = cell.value().get_subtree_size();
             for l in (0..max_layer).rev() {
                 let coarser_index = cell.get_larger_cell_index_at_layer(l as u16);
                 let coarser_cell = self.get_layer(l as u16).get_cell(&coarser_index).unwrap();
@@ -966,7 +976,7 @@ where
         let mut benefits = Vec::<BenefitUnit>::with_capacity(best_cell_finest_at_higher_l.len());
         for bc0_l in best_cell_finest_at_higher_l {
             log::trace!("bc0l (index at 0, layer, benefit): {:?}", bc0_l);
-            let benefit = BenefitUnit::new(bc0_l.0, bc0_l.1 .0, bc0_l.1 .1);
+            let benefit = BenefitUnit::new(bc0_l.0, bc0_l.1 .0, max_layer, bc0_l.1 .1);
             benefits.push(benefit);
         }
         benefits.par_sort_unstable_by(|unita, unitb| {
@@ -990,12 +1000,14 @@ where
         benefits
     } // end of compute_benefits_2
 
+    //
+
     /// builds a partition of size p_size from sorted benefits
     pub(crate) fn get_partition(
         &self,
         p_size: usize,
         benefit_units: &[BenefitUnit],
-    ) -> (DashMap<PointId, u32>, DashMap<usize, PointId>) {
+    ) -> (DashMap<PointId, u32>, DashMap<u32, PointId>) {
         //
         let nb_points = self.get_nb_points();
         log::info!(
@@ -1003,15 +1015,17 @@ where
             nb_points,
             p_size
         );
+        // to each point its cluster
         let clusters = DashMap::<PointId, u32>::with_capacity(nb_points);
-        let centers = DashMap::<usize, PointId>::with_capacity(p_size);
+        // to each cluster rank, the pid of point found as its center
+        let centers = DashMap::<u32, PointId>::with_capacity(p_size);
         //
         let loop_min_size = p_size.min(benefit_units.len());
         for i in 0..loop_min_size {
             log::debug!("in SpaceMesh::get_partition benefit unit : {}", i);
             let unit = &benefit_units[i];
             let (_, layer) = unit.get_id();
-            let idx_l = unit.get_index_at_layer(self.get_nb_layers() as u16);
+            let idx_l = unit.get_index_at_layer(layer as u16);
             // get cell
             let ref_cell_opt = self.get_cell(&idx_l, layer);
             if ref_cell_opt.is_none() {
@@ -1043,7 +1057,7 @@ where
                     }
                     let unit_j = &benefit_units[j];
                     let (_, layer_j) = unit_j.get_id();
-                    let idx_j = unit_j.get_index_at_layer(self.get_nb_layers() as u16);
+                    let idx_j = unit_j.get_index_at_layer(layer_j);
                     let ref_cell_j = self.get_cell(&idx_j, layer_j).unwrap();
                     if ref_cell_j.has_point(point.get_id()) {
                         break true;
@@ -1074,8 +1088,9 @@ where
                         i
                     );
                     // store center
-                    if centers.get(&i).is_none() {
-                        centers.insert(i, point.get_id());
+                    let clust: u32 = i.try_into().unwrap();
+                    if centers.get(&clust).is_none() {
+                        centers.insert(clust, point.get_id());
                     }
                 } // end !found
                 let old = nbpoint_i.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1105,16 +1120,18 @@ where
     pub(crate) fn compute_medoid_cost(
         &self,
         pt_affectation: &DashMap<usize, u32>,
-        cluster_center: &DashMap<usize, usize>,
+        cluster_center: &DashMap<u32, usize>,
     ) -> f64 {
         assert_eq!(self.get_nb_points(), pt_affectation.len());
-
+        //
+        log::info!("SpaceMesh compute_medoid_cost");
+        //
         let mut norm = T::zero();
         let points = self.points.as_ref().unwrap();
         log::info!("dimension : {}", points[0].get_dimension());
         for point in points.iter() {
             let xyz = point.get_position();
-            let cluster_rank = *pt_affectation.get(&point.get_id()).unwrap().value() as usize;
+            let cluster_rank = *pt_affectation.get(&point.get_id()).unwrap().value();
             let center_rank = *cluster_center.get(&cluster_rank).unwrap().value();
             let center_pt = points[center_rank].get_position();
             let dist = xyz
@@ -1129,8 +1146,9 @@ where
             );
             norm += dist;
         }
-        norm /= T::from(points.len()).unwrap();
-        norm.to_f64().unwrap()
+        let norm_f64 = norm.to_f64().unwrap();
+        log::info!("SpaceMesh compute_medoid_cost : {:.3e}", norm_f64);
+        norm_f64
     }
 
     // we need to compute cardinal of each subtree (all descendants of each cell)

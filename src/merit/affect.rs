@@ -2,6 +2,7 @@
 #![allow(unused)]
 
 use dashmap::DashMap;
+use indexmap::IndexSet;
 use ndarray::{Array1, Array2};
 use std::collections::hash_map::Iter;
 use std::collections::HashMap;
@@ -18,8 +19,6 @@ use std::marker::PhantomData;
 pub trait Affectation<DataId, DataLabel> {
     /// given a dataId, returns its label or cluster Id
     fn get_affectation(&self, dataid: DataId) -> DataLabel;
-    /// returns the number of labels (or clusters)
-    fn get_nb_cluster(&self) -> usize;
     /// returns number of points in clusters
     fn get_nb_points(&self) -> usize;
     /// iterator on couples (dataid, label)
@@ -40,10 +39,6 @@ where
 {
     fn get_affectation(&self, id: DataId) -> DataLabel {
         *self.affectation.get(&id).unwrap()
-    }
-
-    fn get_nb_cluster(&self) -> usize {
-        self.affectation.values().len()
     }
 
     fn get_nb_points(&self) -> usize {
@@ -94,7 +89,6 @@ where
 /// Clusters defined by a DashMap
 pub struct DashAffectation<'a, DataId, DataLabel> {
     affectation: &'a DashMap<DataId, DataLabel>,
-    nb_cluster: usize,
 }
 
 impl<DataId, DataLabel> Affectation<DataId, DataLabel> for DashAffectation<'_, DataId, DataLabel>
@@ -105,9 +99,6 @@ where
     fn get_affectation(&self, id: DataId) -> DataLabel {
         let item = self.affectation.get(&id).unwrap();
         *item.value()
-    }
-    fn get_nb_cluster(&self) -> usize {
-        self.nb_cluster
     }
 
     fn get_nb_points(&self) -> usize {
@@ -124,11 +115,8 @@ where
     DataId: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
     DataLabel: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
 {
-    pub fn new(affectation: &'a DashMap<DataId, DataLabel>, nb_cluster: usize) -> Self {
-        DashAffectation {
-            affectation,
-            nb_cluster,
-        }
+    pub fn new(affectation: &'a DashMap<DataId, DataLabel>) -> Self {
+        DashAffectation { affectation }
     }
 }
 
@@ -175,16 +163,15 @@ where
 /// Clusters defined by a Vec, DataId is an usize Vec\[i\] gives the label of the i-th data
 pub struct VecAffectation<DataLabel> {
     affectation: Vec<DataLabel>,
-    nb_cluster: usize,
 }
 
-impl<DataLabel> VecAffectation<DataLabel> {
+impl<DataLabel> VecAffectation<DataLabel>
+where
+    DataLabel: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
+{
     /// builds a vector affectation
     pub fn new(affectation: Vec<DataLabel>, nb_cluster: usize) -> Self {
-        VecAffectation {
-            affectation,
-            nb_cluster,
-        }
+        VecAffectation { affectation }
     }
 }
 
@@ -194,10 +181,6 @@ where
 {
     fn get_affectation(&self, id: usize) -> DataLabel {
         self.affectation[id]
-    }
-
-    fn get_nb_cluster(&self) -> usize {
-        self.nb_cluster
     }
 
     fn get_nb_points(&self) -> usize {

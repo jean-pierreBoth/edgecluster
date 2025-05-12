@@ -75,26 +75,27 @@ where
     pub fn new(clusters1: Clusterization, clusters2: Clusterization) -> Self {
         assert_eq!(clusters1.get_nb_points(), clusters2.get_nb_points());
         //
-        let nbclust1 = clusters1.get_nb_cluster();
-        let nbclust2: usize = clusters2.get_nb_cluster();
-        let mut table = Array2::<usize>::zeros((nbclust1, nbclust2));
-        let mut c1_size: ndarray::ArrayBase<ndarray::OwnedRepr<usize>, ndarray::Dim<[usize; 1]>> =
-            Array1::<usize>::zeros(nbclust1);
-        let mut c2_size: ndarray::ArrayBase<ndarray::OwnedRepr<usize>, ndarray::Dim<[usize; 1]>> =
-            Array1::<usize>::zeros(nbclust2);
+        log::info!("entering Contingency::new");
         //
         // converts labels to contiguous interval of usize. label_rank = IndexSet::get_index_of(label).unwrap()
         //
-        let mut labels1 = IndexSet::<DataLabel>::with_capacity(nbclust1);
+        let mut labels1 = IndexSet::<DataLabel>::with_capacity(50);
         let affect1_iter = clusters1.iter();
         for (_, label) in affect1_iter {
             labels1.insert(label);
         }
-        let mut labels2 = IndexSet::<DataLabel>::with_capacity(nbclust1);
+        let mut labels2 = IndexSet::<DataLabel>::with_capacity(50);
         let affect2_iter = clusters2.iter();
         for (_, label) in affect2_iter {
             labels2.insert(label);
         }
+        let nb_labels1 = labels1.len();
+        let nb_labels2 = labels2.len();
+        let mut table = Array2::<usize>::zeros((nb_labels1, nb_labels2));
+        let mut c1_size: ndarray::ArrayBase<ndarray::OwnedRepr<usize>, ndarray::Dim<[usize; 1]>> =
+            Array1::<usize>::zeros(nb_labels1);
+        let mut c2_size: ndarray::ArrayBase<ndarray::OwnedRepr<usize>, ndarray::Dim<[usize; 1]>> =
+            Array1::<usize>::zeros(nb_labels2);
         // computes contingency table
         let affect1_iter = clusters1.iter();
         // we loop on affect1_iter, query each item relativeley to clusters2 and dispatch to table
@@ -109,6 +110,7 @@ where
             // and summing on rows item in cluster2 appears exactly once (as long as the same set of DataId is in both clusterization)
             table[[rank_l1, rank_l2]] += 1;
         }
+        log::info!("contingency table computed ({},{})", nb_labels1, nb_labels2);
         // compute entropies H and I
         let nb_total_usize = c1_size.iter().fold(0, |acc, x| acc + *x);
         assert_eq!(nb_total_usize, clusters1.get_nb_points());
@@ -128,9 +130,9 @@ where
         //
         let mut entropy_1cond2: f64 = 0.;
         let mut information_12: f64 = 0.;
-        for i in 0..nbclust1 {
+        for i in 0..nb_labels1 {
             let frac_i: f64 = c1_size[i] as f64 / nb_total;
-            for j in 0..nbclust2 {
+            for j in 0..nb_labels2 {
                 let frac_ij = table[[i, j]] as f64 / nb_total;
                 let frac_j: f64 = c2_size[j] as f64 / nb_total;
                 //
@@ -140,6 +142,8 @@ where
         }
         entropy_1cond2 /= nb_total;
         information_12 /= nb_total;
+        //
+        log::info!("Contingency allocation");
         //
         Contingency {
             clusters1,
@@ -196,8 +200,8 @@ where
 
     /// upper bound of expectation of joint information
     pub fn information_ebound(&self) -> f64 {
-        let nbclust1 = self.clusters1.get_nb_cluster();
-        let nbclust2: usize = self.clusters2.get_nb_cluster();
+        let nbclust1 = self.c1_size.len();
+        let nbclust2: usize = self.c2_size.len();
         let nb_total = self.clusters1.get_nb_points();
         let a: usize = nb_total + nbclust1 * nbclust2 - nbclust1 - nbclust2;
         //
@@ -244,10 +248,9 @@ where
     /// computes upper bound for cross informaion, valid for large n
     /// See Th 7 from [Vinh 2010](https://jmlr.csail.mit.edu/papers/volume11/vinh10a/vinh10a.pdf)
     pub fn information_12_expectation_upper(&self) -> f64 {
-        let n: usize = self.clusters1.get_nb_points()
-            + self.clusters1.get_nb_cluster() * self.clusters2.get_nb_cluster()
-            - self.clusters1.get_nb_cluster()
-            - self.clusters2.get_nb_cluster();
+        let n: usize = self.clusters1.get_nb_points() + self.c1_size.len() * self.c2_size.len()
+            - self.c1_size.len()
+            - self.c2_size.len();
         let d: usize = self.clusters1.get_nb_points() - 1;
         (n as f64 / d as f64).ln()
     }
