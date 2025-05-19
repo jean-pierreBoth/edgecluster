@@ -75,7 +75,7 @@ fn read_song_csv(
                 record.len()
             ));
         }
-        let mut new_data = Vec::<f32>::with_capacity(nb_column);
+        let mut new_data = Vec::<f32>::with_capacity(nb_var);
         for j in 0..nb_column {
             let field = record.get(j).unwrap();
             // decode into Ix type
@@ -147,7 +147,7 @@ fn main() {
     //===================================
     let nb_cluster_asked = 100;
     let auto_dim = false;
-    let _small_dim = Some(5);
+    let _small_dim = Some(3);
     //===================================
     //
     // cluster without specifying a dimension reducer

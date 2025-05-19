@@ -1015,6 +1015,7 @@ where
             nb_points,
             p_size
         );
+        let layer_max = self.get_nb_layers() - 1;
         // to each point its cluster
         let clusters = DashMap::<PointId, u32>::with_capacity(nb_points);
         // to each cluster rank, the pid of point found as its center
@@ -1024,7 +1025,19 @@ where
         for i in 0..loop_min_size {
             log::debug!("in SpaceMesh::get_partition benefit unit : {}", i);
             let unit = &benefit_units[i];
-            let (_, layer) = unit.get_id();
+            let (id_max, layer) = unit.get_id();
+            // get the id of point for which this unit was created and set it as cluster center
+            // get a point at which this unit opened
+            let cell_finest = self.get_cell(id_max, layer_max as u16).unwrap();
+            let center_point_id = cell_finest.value().get_points().unwrap()[0].get_id();
+            // store center
+            let clust: u32 = i.try_into().unwrap();
+            if centers.get(&clust).is_none() {
+                centers.insert(clust, center_point_id);
+            } else {
+                panic!("should not occur")
+            }
+            //
             let idx_l = unit.get_index_at_layer(layer as u16);
             // get cell
             let ref_cell_opt = self.get_cell(&idx_l, layer);
@@ -1039,12 +1052,16 @@ where
             }
             let ref_cell = ref_cell_opt.unwrap();
             let unit_cell = ref_cell.value();
-            log::debug!(
-                "cell : {:?}, layer : {}, nb points : {}",
+
+            log::info!(
+                "cell idx : {:?}, at layer : {}, benefit : {:.2e}, nb points : {}, id at finest layer : {:?}",
                 idx_l,
                 layer,
-                unit_cell.get_nb_points()
+                unit.get_benefit(),
+                unit_cell.get_nb_points(),
+                id_max
             );
+
             let points = unit_cell.get_points().unwrap();
             // what is exclusively in unit i and not in sub-sequent units
             let nbpoint_i = AtomicUsize::new(0);
@@ -1087,11 +1104,6 @@ where
                         point.get_position(),
                         i
                     );
-                    // store center
-                    let clust: u32 = i.try_into().unwrap();
-                    if centers.get(&clust).is_none() {
-                        centers.insert(clust, point.get_id());
-                    }
                 } // end !found
                 let old = nbpoint_i.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if log::log_enabled!(log::Level::Debug) && old % 10000 == 0 {
@@ -1106,6 +1118,7 @@ where
         );
         //
         assert_eq!(centers.len(), p_size);
+        let _cost = self.compute_medoid_cost(&clusters, &centers);
         if log::log_enabled!(log::Level::Debug) {
             log::info!("nb points : {}", self.get_nb_points());
             let cost = self.compute_medoid_cost(&clusters, &centers);

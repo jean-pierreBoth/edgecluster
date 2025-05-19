@@ -123,7 +123,7 @@ pub fn main() {
     //===================================
     let nb_cluster_asked = 20;
     let auto_dim = false;
-    let _small_dim = Some(15);
+    let _small_dim = Some(3);
     //===================================
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(ref_points, None);
@@ -149,7 +149,7 @@ pub fn main() {
         "medoid l1 cost : {:.3e}",
         cluster_res.compute_cost_medoid_l1(&refpoints, output)
     );
-    cluster_res.dump_cluster_size();
+    cluster_res.dump_cluster_id();
     // merit comparison
     println!("merit ctatus");
     //

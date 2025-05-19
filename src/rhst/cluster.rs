@@ -83,9 +83,16 @@ impl ClusterResult {
         &self.clusters
     }
 
-    pub fn dump_cluster_size(&self) {
+    pub fn dump_cluster_id(&self) {
         for (rank, v) in self.clusters.iter().enumerate() {
-            println!("cluster : {} , size : {}", rank, v.len());
+            let r_u32: u32 = rank.try_into().unwrap();
+            let center_id = *self.cluster_center_to_pid.get(&r_u32).unwrap().value();
+            println!(
+                "cluster : {} , center_id : {}, size : {}",
+                rank,
+                center_id,
+                v.len()
+            );
         }
     }
 
@@ -432,7 +439,7 @@ where
         let (point_reaffectation, medoid_cost) =
             self.compute_cost_medoid_l1(&point_to_cluster, &cluster_to_center_pid);
         log::info!(
-            "medoid cost in original space (l1) : {:.3e} with {} clusters",
+            "medoid cost in original space after reaffectation (l1) : {:.3e} with {} clusters",
             medoid_cost,
             nb_cluster
         );
@@ -597,10 +604,10 @@ mod tests {
         log::info!("in test_cluster_random");
         //=====================================
         // points are generated around 5 centers/labels
-        let nbvec = 1_000_000usize;
+        let nbvec = 1000_000usize;
         let dim = 2;
         let width: f64 = 1.;
-        let nb_cluster_asked = 15;
+        let nb_cluster_asked = 5;
         //=====================================
         let unif_01 = Uniform::<f64>::new(0., width).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
@@ -623,7 +630,7 @@ mod tests {
         hcluster.set_debug_level(1);
         let auto_dim = false;
         let cluster_res = hcluster.cluster(nb_cluster_asked, auto_dim, None);
-        cluster_res.dump_cluster_size();
+        cluster_res.dump_cluster_id();
         let algo_affectation = cluster_res.get_dash_affectation();
         //
         let refpoints = hcluster.get_points();
@@ -653,7 +660,7 @@ mod tests {
         let nbvec = 10_00_000usize;
         let dim = 5;
         let width: f32 = 100.;
-        let nb_cluster_asked = 15;
+        let nb_cluster_asked = 5;
         let lambda = 5;
 
         // sample with coordinates following exponential law
@@ -678,7 +685,7 @@ mod tests {
         let mut hcluster = Hcluster::new(refpoints, None);
         let auto_dim = false;
         let cluster_res = hcluster.cluster(nb_cluster_asked, auto_dim, None);
-        cluster_res.dump_cluster_size();
+        cluster_res.dump_cluster_id();
         //
         let algo_affectation = cluster_res.get_dash_affectation();
         //
