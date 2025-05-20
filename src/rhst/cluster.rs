@@ -418,7 +418,7 @@ where
         //
         spacemesh.summary();
 
-        let filtered_benefits = spacemesh.compute_benefits(1);
+        let filtered_benefits = spacemesh.compute_benefits();
         if log::log_enabled!(log::Level::Trace) {
             log::trace!(
                 "dump of filtered_benefits, nbunits : {}",
