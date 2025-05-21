@@ -905,6 +905,7 @@ where
             // get the id of point for which this unit was created and set it as cluster center
             // get a point at which this unit opened
             let cell_finest = self.get_cell(id_max, layer_max as u16).unwrap();
+            assert_eq!(cell_finest.value().get_layer(), layer_max);
             let center_point_id = cell_finest.value().get_points().unwrap()[0].get_id();
             // store center
             let clust: u32 = i.try_into().unwrap();

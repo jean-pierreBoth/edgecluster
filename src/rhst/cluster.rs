@@ -436,6 +436,7 @@ where
             spacemesh.get_partition(nb_cluster, &filtered_benefits);
         assert_eq!(cluster_to_center_pid.len(), nb_cluster);
         // keep centers and reaffect, computing new cost
+
         let (point_reaffectation, medoid_cost) =
             self.compute_cost_medoid_l1(&point_to_cluster, &cluster_to_center_pid);
         log::info!(
@@ -445,7 +446,7 @@ where
         );
         //
         let mut clusters: Vec<Vec<usize>> = (0..nb_cluster).map(|_| Vec::<usize>::new()).collect();
-        for item in point_reaffectation.iter() {
+        for item in point_to_cluster.iter() {
             clusters[*item.value() as usize].push(*item.key());
         }
         let mut centers_pid = vec![0usize; nb_cluster];
@@ -543,7 +544,21 @@ where
             }
             norm.fetch_add(mindist, Ordering::Acquire);
         });
-
+        //
+        // how many points changed in reaffectation
+        //
+        let mut nb_changed = 0;
+        for item in &new_affectation {
+            let pt_id = item.key();
+            if *pt_affectation.get(pt_id).unwrap().value() != *item.value() {
+                nb_changed += 1;
+            }
+        }
+        log::info!(
+            "HCluster compute_cost_medoid_l1 nb change of affectation : {}",
+            nb_changed
+        );
+        //
         let norm_f64 = norm.into_inner();
         log::info!(
             "exiting HCluster compute_cost_medoid_l1, cost : {:.3e}",
