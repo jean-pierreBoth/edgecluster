@@ -872,7 +872,7 @@ where
         );
         //
         benefits
-    } // end of compute_benefits_1
+    } // end of compute_benefits
 
     //
 
@@ -929,8 +929,8 @@ where
             }
             let ref_cell = ref_cell_opt.unwrap();
             let unit_cell = ref_cell.value();
-
-            log::info!(
+            if loop_min_size <= 100 && idx_l.len() <= 10 {
+                log::info!(
                 "cell idx : {:?}, at layer : {}, benefit : {:.2e}, nb points : {}, id at finest layer : {:?}",
                 idx_l,
                 layer,
@@ -938,6 +938,7 @@ where
                 unit_cell.get_nb_points(),
                 id_max
             );
+            }
 
             let points = unit_cell.get_points().unwrap();
             // what is exclusively in unit i and not in sub-sequent units

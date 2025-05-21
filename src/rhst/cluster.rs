@@ -138,29 +138,31 @@ impl ClusterResult {
 
     #[cfg_attr(doc, katexit::katexit)]
     /// cost returned is
-    /// $ 1./N * \sum_{1}^{N}  ||x_{i} - C(x_{i})|| $ where $C(x_{i})$ is the nearest cluster center for $ x_{i}$.
+    /// $ \sum_{1}^{N}  ||x_{i} - C(x_{i})|| $ where $C(x_{i})$ is the nearest cluster center for $ x_{i}$.
     /// result will be written in a csv file with name $filename$
-    pub fn compute_cost_mean_l2<
+    pub fn compute_cost_medoid_l2<
         T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign,
     >(
         &self,
         points: &[&Point<T>],
         dumpfile: Option<&str>,
     ) -> T {
-        let centers = self.compute_cluster_mean_center(points);
+        log::info!("in ClusterResult compute_cost_medoid_l2");
+        //
         let mut norm = T::zero();
         for item in self.point_to_cluster.iter() {
             let point = points[*item.key()];
             let xyz = point.get_position();
             let key = point.get_id();
             let cluster = *self.point_to_cluster.get(&key).unwrap().value();
+            let center_id = *self.cluster_center_to_pid.get(&cluster).unwrap().value();
+            let center_point = points[center_id];
             norm += xyz
                 .iter()
-                .zip(&centers[cluster as usize])
-                .fold(T::zero(), |acc, (p, c)| (acc + (*p - *c) * (*p - *c)))
+                .zip(center_point.get_position())
+                .fold(T::zero(), |acc, (p, c)| acc + (*p - *c) * (*p - *c))
                 .sqrt()
         }
-        norm /= T::from(points.len()).unwrap();
         //
         if let Some(csvloc) = dumpfile {
             let mut csvpath = PathBuf::from(".");
@@ -171,16 +173,19 @@ impl ClusterResult {
                 .write(true)
                 .open(&csvpath);
             if csvfileres.is_err() {
-                println!("compute_cost could not open file {:?}", csvpath.as_os_str());
+                println!(" could not open file {:?}", csvpath.as_os_str());
             }
             let wtr = WriterBuilder::new().from_path(&csvpath);
             if wtr.is_err() {
-                log::error!("cannot open dump csv file");
+                log::error!("compute_cost_medoid_l1 cannot open dump csv file");
             } else {
                 log::info!("dumping csv file in {:?}", csvpath.as_os_str());
                 let mut wtr = wtr.unwrap();
-                for c in &centers {
-                    let csv_record = CsvRecord::from(c);
+                for item in self.cluster_center_to_pid.iter() {
+                    let cluster = *item.key();
+                    let center_id = *self.cluster_center_to_pid.get(&cluster).unwrap().value();
+                    let center_point = points[center_id];
+                    let csv_record = CsvRecord::from(center_point.get_position());
                     wtr.serialize(csv_record.center_str).unwrap();
                 }
             }
@@ -193,7 +198,7 @@ impl ClusterResult {
 
     #[cfg_attr(doc, katexit::katexit)]
     /// cost returned is
-    /// $ 1./N * \sum_{1}^{N}  ||x_{i} - C(x_{i})|| $ where $C(x_{i})$ is the nearest cluster center for $ x_{i}$.
+    /// $ \sum_{1}^{N}  ||x_{i} - C(x_{i})|| $ where $C(x_{i})$ is the nearest cluster center for $ x_{i}$.
     /// result will be written in a csv file with name $filename$
     pub fn compute_cost_medoid_l1<
         T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign,
@@ -438,9 +443,9 @@ where
         // keep centers and reaffect, computing new cost
 
         let (point_reaffectation, medoid_cost) =
-            self.compute_cost_medoid_l1(&point_to_cluster, &cluster_to_center_pid);
+            self.compute_cost_medoid_l2(&point_to_cluster, &cluster_to_center_pid);
         log::info!(
-            "medoid cost in original space after reaffectation (l1) : {:.3e} with {} clusters",
+            "medoid cost in original space after reaffectation (l2) : {:.3e} with {} clusters",
             medoid_cost,
             nb_cluster
         );
@@ -467,41 +472,79 @@ where
     // cluster_center contains the point_id designated as the center , resulting from benefit analysis
     // returns mean L2 cost
     #[allow(unused)]
-    pub(crate) fn compute_medoid_cost_l2(
+    pub(crate) fn compute_cost_medoid_l2(
         &self,
         pt_affectation: &DashMap<usize, u32>,
-        cluster_center: &DashMap<usize, usize>,
-    ) -> f64 {
+        cluster_center: &DashMap<u32, usize>,
+    ) -> (DashMap<usize, u32>, f64) {
+        //
+        log::info!("in HCluster compute_cost_medoid_l2");
+        //
         assert_eq!(self.points.len(), pt_affectation.len());
 
-        let mut norm = T::zero();
+        let new_affectation = DashMap::<usize, u32>::new();
+        let norm: AtomicF64 = AtomicF64::new(0.);
+        let nb_cluster = cluster_center.len();
+        let nb_points = self.points.len();
+        let points = &self.points;
         log::info!("dimension : {}", self.points[0].get_dimension());
-        for point in self.points.iter() {
+        (0..nb_points).into_par_iter().for_each(|point_rank| {
+            let point = points[point_rank];
             let xyz = point.get_position();
-            let cluster_rank = *pt_affectation.get(&point.get_id()).unwrap().value() as usize;
-            let center_rank = *cluster_center.get(&cluster_rank).unwrap().value();
-            let center_pt = self.points[center_rank].get_position();
-            let dist = xyz
-                .iter()
-                .zip(center_pt)
-                .fold(T::zero(), |acc, (p, c)| acc + (*p - *c) * (*p - *c));
-            log::trace!(
-                "point : {},  center : {}, dist : {:.3e}",
-                point.get_id(),
-                center_rank,
-                dist.to_f64().unwrap()
-            );
-            norm += num_traits::Float::sqrt(dist);
+            let mut mindist = f64::MAX;
+            let mut minclust: usize = usize::MAX;
+            for i in 0..nb_cluster {
+                let cluster_rank: u32 = i.try_into().unwrap();
+                let center_rank = *cluster_center.get(&cluster_rank).unwrap().value();
+                let center_pt = points[center_rank].get_position();
+                let dist2 = xyz
+                    .iter()
+                    .zip(center_pt)
+                    .fold(T::zero(), |acc, (p, c)| acc + (*p - *c) * (*p - *c));
+                let dist = num_traits::Float::sqrt(dist2);
+                log::trace!(
+                    "point : {},  center : {}, dist : {:.3e}",
+                    point.get_id(),
+                    center_rank,
+                    dist.to_f64().unwrap()
+                );
+                if dist.to_f64().unwrap() < mindist {
+                    mindist = dist.to_f64().unwrap();
+                    minclust = i;
+                }
+                new_affectation.insert(point_rank, minclust as u32);
+            }
+            norm.fetch_add(mindist, Ordering::Acquire);
+        });
+        //
+        // how many points changed in reaffectation
+        //
+        let mut nb_changed = 0;
+        for item in &new_affectation {
+            let pt_id = item.key();
+            if *pt_affectation.get(pt_id).unwrap().value() != *item.value() {
+                nb_changed += 1;
+            }
         }
-        norm /= T::from(self.points.len()).unwrap();
-        norm.to_f64().unwrap()
-    }
+        log::info!(
+            "HCluster compute_cost_medoid_l2 nb change of affectation : {}",
+            nb_changed
+        );
+        //
+        let norm_f64 = norm.into_inner();
+        log::info!(
+            "exiting HCluster compute_cost_medoid_l2, cost after reaffectation : {:.3e}",
+            norm_f64
+        );
+        (new_affectation, norm_f64)
+    } // end of compute_cost_medoid_l2
 
     //
 
     // cluster_center gives for a cluster rank, the rank of the point in self.points
     // pt_affectation constains the cluster rank,
     // cluster_center contains the point rank designated as the center , resulting from benefit analysis
+    #[allow(unused)]
     pub(crate) fn compute_cost_medoid_l1(
         &self,
         pt_affectation: &DashMap<usize, u32>,
