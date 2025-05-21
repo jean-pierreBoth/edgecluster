@@ -162,7 +162,7 @@ pub(crate) struct Cell<'a, T> {
     layer: u16,
     /// a vector of dimension d, giving center of cell in the mesh coordinates
     /// at layer l , index[i] is in [0,2^l[ for each i
-    index: Vec<u16>,
+    index: Vec<u32>,
     // number of points in subtree of cells
     subtree_size: usize,
     //
@@ -173,7 +173,8 @@ impl<'a, T> Cell<'a, T>
 where
     T: Float + Debug + std::fmt::LowerExp,
 {
-    pub fn new(space: &'a Space, layer: u16, index: Vec<u16>) -> Self {
+    pub fn new(space: &'a Space, layer: u16, index: Vec<u32>) -> Self {
+        assert!(layer < 32);
         Cell {
             space,
             layer,
@@ -212,7 +213,7 @@ where
         self.points_in.as_ref()
     }
 
-    fn get_cell_index(&self) -> &[u16] {
+    fn get_cell_index(&self) -> &[u32] {
         &self.index
     }
 
@@ -232,19 +233,19 @@ where
     }
     // get parent cell in splitting process
     #[allow(unused)]
-    pub(crate) fn get_parent_cell_index(&self) -> Vec<u16> {
+    pub(crate) fn get_parent_cell_index(&self) -> Vec<u32> {
         assert!(self.layer > 0);
-        self.index.iter().map(|x| x / 2).collect::<Vec<u16>>()
+        self.index.iter().map(|x| x / 2).collect::<Vec<u32>>()
     }
 
     // get parent cell at layer l in splitting process, largest cell is down
-    pub(crate) fn get_larger_cell_index_at_layer(&self, l: u16) -> Vec<u16> {
-        assert!(self.layer > l && self.layer - l <= 15);
-        // compute new index by dividing by 2_u16.pow((self.layer -l) as u32);
+    pub(crate) fn get_larger_cell_index_at_layer(&self, l: u16) -> Vec<u32> {
+        assert!(self.layer > l && self.layer - l <= 31);
+        // compute new index by dividing by 2_u32.pow((self.layer -l) as u32);
         self.index
             .iter()
             .map(|x| x >> (self.layer - l))
-            .collect::<Vec<u16>>()
+            .collect::<Vec<u32>>()
     }
 
     // subtree size are computed by reverse of splitting in SpaceMesh::compute_subtree_size
@@ -286,18 +287,18 @@ where
     // recall the tree grow upward. finer mesh is last layer, contrary to the paper
     fn split(&self) -> Option<Vec<Cell<'a, T>>> {
         //
-        assert!(self.layer < u16::MAX);
+        assert!(self.layer < 32);
         //
         if self.points_in.is_none() {
             log::debug!("no points in cell");
             self.points_in.as_ref()?; /* return in case of None */
         }
         //
-        let mut hashed_cells: HashMap<Vec<u16>, Cell<T>> = HashMap::new();
+        let mut hashed_cells: HashMap<Vec<u32>, Cell<T>> = HashMap::new();
         //
         for point in self.points_in.as_ref().unwrap() {
             let xyz = point.get_position();
-            let mut split_index = Vec::<u16>::with_capacity(self.space.get_dim());
+            let mut split_index = Vec::<u32>::with_capacity(self.space.get_dim());
             let cell_center = self.get_cell_center();
             for i in 0..xyz.len() {
                 if xyz[i].to_f64().unwrap() > cell_center[i] {
@@ -346,7 +347,7 @@ pub(crate) struct Layer<'a, T> {
     // cell diameter at this layer
     cell_diameter: f64,
     // hashmap to index in nodes
-    hcells: DashMap<Vec<u16>, Cell<'a, T>>,
+    hcells: DashMap<Vec<u32>, Cell<'a, T>>,
 }
 
 impl<'a, T> Layer<'a, T>
@@ -355,7 +356,7 @@ where
 {
     //
     fn new(layer: u16, cell_diameter: f64) -> Self {
-        let hcells: DashMap<Vec<u16>, Cell<T>> = DashMap::new();
+        let hcells: DashMap<Vec<u32>, Cell<T>> = DashMap::new();
         Layer {
             layer,
             cell_diameter,
@@ -388,24 +389,24 @@ where
     // returns a dashmap Ref to cell is it exist
     // used only to check coherence. Sub cells are created inside one thread.
     // TODO: do we need dashmap?
-    pub(crate) fn get_cell(&self, index: &[u16]) -> Option<one::Ref<Vec<u16>, Cell<'a, T>>> {
+    pub(crate) fn get_cell(&self, index: &[u32]) -> Option<one::Ref<Vec<u32>, Cell<'a, T>>> {
         self.hcells.get(index)
     }
 
     // get an iterator over cells
     #[allow(unused)]
-    pub(crate) fn get_iter(&self) -> iter::Iter<Vec<u16>, Cell<'a, T>> {
+    pub(crate) fn get_iter(&self) -> iter::Iter<Vec<u32>, Cell<'a, T>> {
         self.hcells.iter()
     }
     // get an iterator over cells
     #[allow(unused)]
-    fn get_iter_mut(&self) -> iter::IterMut<Vec<u16>, Cell<'a, T>> {
+    fn get_iter_mut(&self) -> iter::IterMut<Vec<u32>, Cell<'a, T>> {
         self.hcells.iter_mut()
     }
 
     // get an iterator over cells
     #[allow(unused)]
-    fn get_par_iter_mut(&self) -> map::IterMut<Vec<u16>, Cell<'a, T>> {
+    fn get_par_iter_mut(&self) -> map::IterMut<Vec<u32>, Cell<'a, T>> {
         self.hcells.par_iter_mut()
     }
 
@@ -417,7 +418,7 @@ where
         self.cell_diameter
     }
 
-    pub(crate) fn get_hcells(&self) -> &DashMap<Vec<u16>, Cell<'a, T>> {
+    pub(crate) fn get_hcells(&self) -> &DashMap<Vec<u32>, Cell<'a, T>> {
         &self.hcells
     }
     // count points in layer
@@ -459,7 +460,7 @@ where
 #[derive(Debug, Clone)]
 pub(crate) struct BenefitUnit {
     // index in finest layer (layer_max), beccause we construct benefit units from upper layers down to coarsest layer (0!)
-    cell_index: Vec<u16>,
+    cell_index: Vec<u32>,
     // layer corresponding to observe benefit
     layer: u16,
     // max layer num in mesh space
@@ -469,7 +470,7 @@ pub(crate) struct BenefitUnit {
 }
 
 impl BenefitUnit {
-    pub(crate) fn new(cell_index: Vec<u16>, layer: u16, layer_max: u16, benefit: usize) -> Self {
+    pub(crate) fn new(cell_index: Vec<u32>, layer: u16, layer_max: u16, benefit: usize) -> Self {
         BenefitUnit {
             cell_index,
             layer,
@@ -479,13 +480,13 @@ impl BenefitUnit {
     }
 
     // returns cell index and layer
-    pub(crate) fn get_id(&self) -> (&Vec<u16>, u16) {
+    pub(crate) fn get_id(&self) -> (&Vec<u32>, u16) {
         (&self.cell_index, self.layer)
     }
 
     // returns cell index at layer 0.
     #[allow(unused)]
-    pub(crate) fn get_cell_idx(&self) -> &Vec<u16> {
+    pub(crate) fn get_cell_idx(&self) -> &Vec<u32> {
         &self.cell_index
     }
 
@@ -495,14 +496,14 @@ impl BenefitUnit {
     }
 
     // recall index in benefit unit are obtained from finest layer cells
-    pub(crate) fn get_index_at_layer(&self, layer: u16) -> Vec<u16> {
+    pub(crate) fn get_index_at_layer(&self, layer: u16) -> Vec<u32> {
         assert!(layer <= self.layer_max);
         let shift = self.layer_max - layer;
         // compute new index by dividing by 2_u16.pow((shift) as u32);
         self.cell_index
             .iter()
             .map(|x| x >> shift)
-            .collect::<Vec<u16>>()
+            .collect::<Vec<u32>>()
     }
 } // end impl BenefitUnit
 
@@ -591,10 +592,10 @@ where
     }
 
     /// return index in mesh of a cell for a point, at layer l (layer 0 is at coarsest scale)
-    pub fn get_cell_index(&self, p: &[T], l: usize) -> Vec<u16> {
+    pub fn get_cell_index(&self, p: &[T], l: usize) -> Vec<u32> {
         let exp: u32 = l.try_into().unwrap();
         let cell_size = self.get_width() / 2_usize.pow(exp) as f64;
-        let mut index = Vec::<u16>::with_capacity(self.get_dim());
+        let mut index = Vec::<u32>::with_capacity(self.get_dim());
         for d in 0..self.get_dim() {
             let idx_f: f64 = ((p[d].to_f64().unwrap() - self.space.get_xmin()) / cell_size).trunc();
             if idx_f < 0. {
@@ -604,14 +605,14 @@ where
                 );
                 panic!("negative coordinate for cell");
             }
-            assert!(idx_f <= 65535.0);
-            index.push(idx_f as u16);
+            assert!(idx_f <= u32::MAX as f64);
+            index.push(idx_f as u32);
         }
         index
     } // end get_cell_index
 
     /// given index of cell at finer mesh , compute index at layer l
-    pub fn to_coarser_index(&self, finest_index: &[u16], l: u16) -> Vec<u16> {
+    pub fn to_coarser_index(&self, finest_index: &[u32], l: u16) -> Vec<u32> {
         let layer_max: u16 = (self.get_nb_layers() - 1).try_into().unwrap();
         let shift: u16 = layer_max - l;
         finest_index.iter().map(|x| x >> shift).collect()
@@ -619,7 +620,7 @@ where
 
     /// get cell center knowing its finer index and layer.
     /// Returns an error if no cell corresponds to this index.
-    pub fn get_cell_center(&self, idx: &[u16], l: u16) -> anyhow::Result<Vec<f64>> {
+    pub fn get_cell_center(&self, idx: &[u32], l: u16) -> anyhow::Result<Vec<f64>> {
         assert!((l as usize) < self.get_nb_layers());
         let index_l = self.to_coarser_index(idx, l);
         let res = self.layers[l as usize].get_cell(&index_l);
@@ -635,7 +636,7 @@ where
         &self,
         p: &[T],
         l: usize,
-    ) -> Option<one::Ref<Vec<u16>, Cell<'a, T>>> {
+    ) -> Option<one::Ref<Vec<u32>, Cell<'a, T>>> {
         let idx = self.get_cell_index(p, l);
         self.layers[l].get_cell(&idx)
     }
@@ -643,9 +644,9 @@ where
     // if a potential cell at given index and layer do not contain any point, i.e cell is not allocated, we return None
     pub(crate) fn get_cell(
         &self,
-        idx: &[u16],
+        idx: &[u32],
         layer: u16,
-    ) -> Option<one::Ref<Vec<u16>, Cell<'a, T>>> {
+    ) -> Option<one::Ref<Vec<u32>, Cell<'a, T>>> {
         self.layers[layer as usize].get_cell(idx)
     }
 
@@ -672,7 +673,7 @@ where
         self.layers = Vec::with_capacity(15);
         log::info!("SpaceMesh::embed allocated by default nb layers {}", 15);
         // initialize root cell
-        let center = vec![0u16; self.get_dim()];
+        let center = vec![0u32; self.get_dim()];
         // root cell, it is declared above maximum layer as it is isolated...
         let mut global_cell = Cell::<T>::new(self.space, 0u16, center.clone());
         global_cell.init_points(&self.points.as_ref().unwrap().clone());
@@ -710,7 +711,7 @@ where
             if self.layers[new_layer as usize].get_nb_cells() >= self.get_nb_points() {
                 break;
             } else {
-                if new_layer == 15 {
+                if new_layer as u32 == u32::BITS - 1 {
                     log::info!("stopping at max layer : {}", new_layer);
                     break;
                 }
@@ -791,7 +792,7 @@ where
         //
         // iterate over finest layer  and then coarser layers to store cost and then sort benefit array in decreasing order!
         // each cell at coarser layer stores the maximum BenefitUnit observed at its layer
-        let mut best_finer_cell_contribution = HashMap::<(Vec<u16>, u16), BenefitUnit>::new();
+        let mut best_finer_cell_contribution = HashMap::<(Vec<u32>, u16), BenefitUnit>::new();
         let finest_layer = self.get_layer(max_layer);
         for cell in finest_layer.get_hcells().iter() {
             let mut benefit_at_layer = Vec::<usize>::with_capacity(nb_layers);
@@ -824,7 +825,7 @@ where
         // now we collect for each cell at finest layer,  the coarser level layer ( > 0 in the paper, but < max_layer in our implementation)
         // at which it is the best contribution
         // TODO: the loop should be made // but for Mnist 70000 pts useless
-        let mut higher_best_finer_layer_contribution = HashMap::<Vec<u16>, BenefitUnit>::new();
+        let mut higher_best_finer_layer_contribution = HashMap::<Vec<u32>, BenefitUnit>::new();
         for cell in finest_layer.get_hcells().iter() {
             let mut best_unit: Option<&BenefitUnit> = None;
             for l in (0..max_layer).rev() {
@@ -873,8 +874,6 @@ where
         //
         benefits
     } // end of compute_benefits
-
-    //
 
     //
 
@@ -1105,7 +1104,7 @@ where
     for unit in benefits {
         let (finer_idx, l) = unit.get_id();
         let shift = spacemesh.get_nb_layers() - 1 - l as usize;
-        let up_idx: Vec<u16> = finer_idx.iter().map(|x| x >> shift).collect();
+        let up_idx: Vec<u32> = finer_idx.iter().map(|x| x >> shift).collect();
         if let Some(cell) = spacemesh.get_layer(l).get_cell(&up_idx) {
             assert!(cell.get_nb_points() > 0);
             nb_points_in += cell.get_nb_points();

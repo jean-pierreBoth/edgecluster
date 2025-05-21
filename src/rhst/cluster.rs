@@ -484,6 +484,7 @@ where
 
         let new_affectation = DashMap::<usize, u32>::new();
         let norm: AtomicF64 = AtomicF64::new(0.);
+        let without_reaffectation_norm = AtomicF64::new(0.);
         let nb_cluster = cluster_center.len();
         let nb_points = self.points.len();
         let points = &self.points;
@@ -508,6 +509,9 @@ where
                     center_rank,
                     dist.to_f64().unwrap()
                 );
+                if cluster_rank == *pt_affectation.get(&point_rank).unwrap().value() {
+                    without_reaffectation_norm.fetch_add(dist.to_f64().unwrap(), Ordering::Acquire);
+                }
                 if dist.to_f64().unwrap() < mindist {
                     mindist = dist.to_f64().unwrap();
                     minclust = i;
@@ -527,8 +531,8 @@ where
             }
         }
         log::info!(
-            "HCluster compute_cost_medoid_l2 nb change of affectation : {}",
-            nb_changed
+            "HCluster compute_cost_medoid_l2 cost before reaffectation : {:.3e}, nb change of affectation : {}",
+            without_reaffectation_norm.into_inner(), nb_changed
         );
         //
         let norm_f64 = norm.into_inner();
@@ -696,7 +700,7 @@ mod tests {
         let output = Some("cluster_random.csv");
         println!(
             "global cost : {:.3e}",
-            cluster_res.compute_cost_medoid_l1(&refpoints, output)
+            cluster_res.compute_cost_medoid_l2(&refpoints, output)
         );
         println!("merit ctatus");
         // entropy merit
@@ -750,7 +754,7 @@ mod tests {
         let refpoints = hcluster.get_points();
         println!(
             "global cost : {:.3e}",
-            cluster_res.compute_cost_medoid_l1(&refpoints, None)
+            cluster_res.compute_cost_medoid_l2(&refpoints, None)
         );
         //
         // merit comparison
