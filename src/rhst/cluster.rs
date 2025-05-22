@@ -83,16 +83,32 @@ impl ClusterResult {
         &self.clusters
     }
 
-    pub fn dump_cluster_id(&self) {
+    /// dump info on clusters: centerid , size, possibly labels of centers
+    /// labels : a vector containing points labels
+    pub fn dump_cluster_id<LabelId>(&self, labels: Option<Vec<LabelId>>)
+    where
+        LabelId: Copy + Clone + std::fmt::Display,
+    {
         for (rank, v) in self.clusters.iter().enumerate() {
             let r_u32: u32 = rank.try_into().unwrap();
             let center_id = *self.cluster_center_to_pid.get(&r_u32).unwrap().value();
-            println!(
-                "cluster : {} , center_id : {}, size : {}",
-                rank,
-                center_id,
-                v.len()
-            );
+            if labels.is_none() {
+                println!(
+                    "cluster : {} , center_id : {}, size : {}",
+                    rank,
+                    center_id,
+                    v.len()
+                );
+            } else {
+                let label_id = labels.as_ref().unwrap()[center_id];
+                println!(
+                    "cluster : {} , center_id : {}, label : {}, size : {}",
+                    rank,
+                    center_id,
+                    label_id,
+                    v.len()
+                );
+            }
         }
     }
 
@@ -692,7 +708,7 @@ mod tests {
         hcluster.set_debug_level(1);
         let auto_dim = false;
         let cluster_res = hcluster.cluster(nb_cluster_asked, auto_dim, None);
-        cluster_res.dump_cluster_id();
+        cluster_res.dump_cluster_id::<usize>(None);
         let algo_affectation = cluster_res.get_dash_affectation();
         //
         let refpoints = hcluster.get_points();
@@ -747,7 +763,7 @@ mod tests {
         let mut hcluster = Hcluster::new(refpoints, None);
         let auto_dim = false;
         let cluster_res = hcluster.cluster(nb_cluster_asked, auto_dim, None);
-        cluster_res.dump_cluster_id();
+        cluster_res.dump_cluster_id::<usize>(None);
         //
         let algo_affectation = cluster_res.get_dash_affectation();
         //
