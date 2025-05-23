@@ -878,6 +878,7 @@ where
     //
 
     /// builds a partition of size p_size from sorted benefits
+    /// This runs on possibly embedded points
     pub(crate) fn get_partition(
         &self,
         p_size: usize,

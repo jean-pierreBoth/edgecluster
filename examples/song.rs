@@ -153,7 +153,7 @@ fn main() {
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(ref_points, None);
     //
-    let cluster_res = hcluster.cluster(nb_cluster_asked, auto_dim, _small_dim);
+    let cluster_res = hcluster.cluster(nb_cluster_asked, auto_dim, None);
     //
     // We construct a corresponding Affectation structure to compare clusters with true labels
     let ref_hashmap = DashMap::<usize, u32>::new();
@@ -174,8 +174,9 @@ fn main() {
     let output = Some("song.csv");
     println!(
         "global cost : {:.3e}",
-        cluster_res.compute_cost_medoid_l1(&ref_points, output)
+        cluster_res.compute_cost_medoid_l2(&ref_points, output)
     );
+    //
     // merit comparison
     println!("merit ctatus");
     //

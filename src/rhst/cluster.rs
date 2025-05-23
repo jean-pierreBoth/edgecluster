@@ -64,8 +64,13 @@ impl ClusterResult {
     pub(crate) fn new(
         point_to_cluster: DashMap<usize, u32>,
         cluster_center_to_pid: DashMap<u32, usize>,
-        clusters: Vec<Vec<usize>>,
+        nb_cluster: usize,
     ) -> ClusterResult {
+        //
+        let mut clusters: Vec<Vec<usize>> = (0..nb_cluster).map(|_| Vec::<usize>::new()).collect();
+        for item in point_to_cluster.iter() {
+            clusters[*item.value() as usize].push(*item.key());
+        }
         ClusterResult {
             point_to_cluster,
             cluster_center_to_pid,
@@ -129,6 +134,9 @@ impl ClusterResult {
         &self,
         points: &[&Point<T>],
     ) -> Vec<Vec<T>> {
+        //
+        log::info!("\n in compute_cluster_mean_center");
+        //
         let dim = points[0].get_dimension();
         let mut centers: Vec<Vec<T>> = (0..self.clusters.len())
             .map(|_| vec![T::zero(); dim])
@@ -210,6 +218,124 @@ impl ClusterResult {
         norm
     }
 
+    //
+    #[cfg_attr(doc, katexit::katexit)]
+    /// we compute mean of cluster and then search point in each cluster thait is
+    /// the closest to the mean. this reduces marginally (~5-10%)the cost.
+    /// Only useful for kmedian clustering, not for hierarchical clustering.
+    ///
+    /// cost returned is
+    /// $ \sum_{1}^{N}  ||x_{i} - C(x_{i})|| $ where $C(x_{i})$ is the nearest cluster center for $ x_{i}$.
+    /// result will be written in a csv file with name $filename$
+    pub fn compute_cost_medoid_recenter_l2<
+        T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign,
+    >(
+        &self,
+        points: &[&Point<T>],
+        dumpfile: Option<&str>,
+    ) -> T {
+        log::info!("\n ==============================================\n in ClusterResult compute_cost_medoid_recenter_l2");
+        //
+        let nb_cluster = self.clusters.len();
+        let dim = points[0].get_dimension();
+        log::info!("dim : {}", dim);
+        // first we compute mean of each cluster
+        // TODO: to make //
+        let mut cluster_mean: Vec<Vec<T>> = (0..nb_cluster)
+            .into_iter()
+            .map(|_| vec![T::zero(); dim])
+            .collect();
+        let mut cluster_size = vec![0usize; nb_cluster];
+        for point in points {
+            let xyz = point.get_position();
+            let key = point.get_id();
+            let cluster = *self.point_to_cluster.get(&key).unwrap().value();
+            for (d, x) in xyz.iter().enumerate() {
+                cluster_mean[cluster as usize][d] += *x;
+            }
+            cluster_size[cluster as usize] += 1;
+        }
+        for i in 0..nb_cluster {
+            assert_eq!(cluster_size[i], self.clusters[i].len());
+            for x in &mut cluster_mean[i] {
+                (*x) /= T::from(cluster_size[i]).unwrap();
+            }
+        }
+        //
+        // now for each cluster we must find the nearest point in this cluster to the mean of cluster
+        // we loop on clusters
+        let mut nb_seen_by_cluster = vec![0usize; nb_cluster];
+        let mut best_point_id_by_cluster = vec![0usize; nb_cluster];
+        let mut best_dist_to_cluster = vec![T::max_value(); nb_cluster];
+        for cluster in self.clusters.iter() {
+            for p in cluster {
+                let point = points[*p];
+                let xyz = point.get_position();
+                let key = point.get_id();
+                let cluster_rank = *self.point_to_cluster.get(&key).unwrap().value() as usize;
+                let dist_to_center = xyz
+                    .iter()
+                    .zip(&cluster_mean[cluster_rank])
+                    .fold(T::zero(), |acc, (p, c)| acc + (*p - *c) * (*p - *c))
+                    .sqrt();
+                nb_seen_by_cluster[cluster_rank] += 1;
+                if dist_to_center < best_dist_to_cluster[cluster_rank] {
+                    best_dist_to_cluster[cluster_rank] = dist_to_center;
+                    best_point_id_by_cluster[cluster_rank] = point.get_id();
+                }
+            }
+        }
+        //
+        let mut norm = T::zero();
+        for point in points {
+            let xyz = point.get_position();
+            let key = point.get_id();
+            let cluster = *self.point_to_cluster.get(&key).unwrap().value();
+            let center_id = best_point_id_by_cluster[cluster as usize];
+            let center_point = points[center_id];
+            norm += xyz
+                .iter()
+                .zip(center_point.get_position())
+                .fold(T::zero(), |acc, (p, c)| acc + (*p - *c) * (*p - *c))
+                .sqrt()
+        }
+        //
+        let total_cost_f: f64 = norm.to_f64().unwrap();
+        log::info!(
+            "\n cost after recomputing mean center : {:.3e}",
+            total_cost_f
+        );
+        log::info!("===============================================");
+        //
+        if let Some(csvloc) = dumpfile {
+            let mut csvpath = PathBuf::from(".");
+            csvpath.push(csvloc);
+            let csvfileres = OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(&csvpath);
+            if csvfileres.is_err() {
+                println!(" could not open file {:?}", csvpath.as_os_str());
+            }
+            let wtr = WriterBuilder::new().from_path(&csvpath);
+            if wtr.is_err() {
+                log::error!("compute_cost_medoid_l1 cannot open dump csv file");
+            } else {
+                log::info!("dumping csv file in {:?}", csvpath.as_os_str());
+                let mut wtr = wtr.unwrap();
+                for item in self.cluster_center_to_pid.iter() {
+                    let cluster = *item.key();
+                    let center_id = *self.cluster_center_to_pid.get(&cluster).unwrap().value();
+                    let center_point = points[center_id];
+                    let csv_record = CsvRecord::from(center_point.get_position());
+                    wtr.serialize(csv_record.center_str).unwrap();
+                }
+            }
+        }
+        //
+        norm
+    }
     //
 
     #[cfg_attr(doc, katexit::katexit)]
@@ -456,8 +582,8 @@ where
         let (point_to_cluster, cluster_to_center_pid) =
             spacemesh.get_partition(nb_cluster, &filtered_benefits);
         assert_eq!(cluster_to_center_pid.len(), nb_cluster);
-        // keep centers and reaffect, computing new cost
 
+        // keep centers and reaffect, computing new cost
         let (point_reaffectation, medoid_cost) =
             self.compute_cost_medoid_l2(&point_to_cluster, &cluster_to_center_pid);
         log::info!(
@@ -466,22 +592,18 @@ where
             nb_cluster
         );
         //
-        let mut clusters: Vec<Vec<usize>> = (0..nb_cluster).map(|_| Vec::<usize>::new()).collect();
-        for item in point_to_cluster.iter() {
-            clusters[*item.value() as usize].push(*item.key());
-        }
         let mut centers_pid = vec![0usize; nb_cluster];
         for item in &cluster_to_center_pid {
             centers_pid[*item.key() as usize] = *item.value();
         }
         //
         println!(
-            " Cluster (embedding+dimensionr reduction + partitioning) time(s) {:?} cpu time {:?}",
+            " Cluster (dimension reduction + embedding + partitioning) time(s) {:?} cpu time {:?}",
             sys_now.elapsed().unwrap().as_secs(),
             cpu_start.elapsed().as_secs()
         );
         //
-        ClusterResult::new(point_reaffectation, cluster_to_center_pid, clusters)
+        ClusterResult::new(point_reaffectation, cluster_to_center_pid, nb_cluster)
     }
 
     // pt_affectation constains the cluster rank,

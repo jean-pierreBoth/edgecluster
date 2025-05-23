@@ -121,13 +121,13 @@ pub fn main() {
     let sys_now = SystemTime::now();
     // distance is normalized by pixel. Value of pixel between 0 and 256
     //===================================
-    let nb_cluster_asked = 20;
+    let nb_cluster_asked = 10;
     let auto_dim = false;
-    let _small_dim = Some(3);
+    let _small_dim = Some(2);
     //===================================
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(ref_points, None);
-    let cluster_res = hcluster.cluster(nb_cluster_asked, auto_dim, _small_dim);
+    let cluster_res = hcluster.cluster(nb_cluster_asked, auto_dim, None);
     let algo_affectation = cluster_res.get_dash_affectation();
     // We construct a corresponding Affectation structure to compare clusters with true labels
     let ref_hashmap = DashMap::<usize, u32>::new();
@@ -146,10 +146,12 @@ pub fn main() {
     let refpoints = hcluster.get_points();
     let output = Some("digits_centers.csv");
     println!(
-        "medoid l1 cost : {:.3e}",
-        cluster_res.compute_cost_medoid_l1(&refpoints, output)
+        "medoid l2 cost : {:.3e}",
+        cluster_res.compute_cost_medoid_l2(&refpoints, output)
     );
-    cluster_res.dump_cluster_id();
+    cluster_res.dump_cluster_id(Some(labels));
+    //
+
     // merit comparison
     println!("merit ctatus");
     //
