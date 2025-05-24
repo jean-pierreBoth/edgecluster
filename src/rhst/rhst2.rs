@@ -678,19 +678,16 @@ where
         let mut global_cell = Cell::<T>::new(self.space, 0u16, center.clone());
         global_cell.init_points(&self.points.as_ref().unwrap().clone());
         let mut l = 0u16;
-        let coarser_layer = Layer::<T>::new(l as u16, self.get_layer_cell_diameter(l as u16));
+        let coarser_layer = Layer::<T>::new(l, self.get_layer_cell_diameter(l));
         self.layers.push(coarser_layer);
 
-        let coarser_layer: &Layer<'a, T> = &self.layers[0 as usize];
+        let coarser_layer: &Layer<'a, T> = &self.layers[0_usize];
         coarser_layer.insert_cells(vec![global_cell]);
         // now we can propagate layer downward, cells can be treated // using par_iter_mut
         loop {
             log::info!("splitting layer : l : {}", l);
             let new_layer = l + 1;
-            let finer_layer = Layer::<T>::new(
-                new_layer as u16,
-                self.get_layer_cell_diameter(new_layer as u16),
-            );
+            let finer_layer = Layer::<T>::new(new_layer, self.get_layer_cell_diameter(new_layer));
             self.layers.push(finer_layer);
             let finer_layer = &self.layers[new_layer as usize];
             // changing into_iter to into_par_iter is sufficient to get //.
@@ -715,7 +712,7 @@ where
                     log::info!("stopping at max layer : {}", new_layer);
                     break;
                 }
-                l = l + 1;
+                l += 1;
             }
         }
         // debug info : dump coordianates of layer 0 origin cell
@@ -798,23 +795,22 @@ where
             let mut benefit_at_layer = Vec::<usize>::with_capacity(nb_layers);
             let mut previous_tree_size: usize = cell.get_subtree_size();
             for l in (0..max_layer).rev() {
-                let coarser_index = cell.get_larger_cell_index_at_layer(l as u16);
-                let coarser_cell = self.get_layer(l as u16).get_cell(&coarser_index).unwrap();
+                let coarser_index = cell.get_larger_cell_index_at_layer(l);
+                let coarser_cell = self.get_layer(l).get_cell(&coarser_index).unwrap();
                 // we can unroll benefit computation ( and finest layer  give no benefit)
                 let delta_l = max_layer - l;
                 let benefit = 2usize.pow(delta_l as u32) * previous_tree_size
                     + benefit_at_layer.last().unwrap_or(&0);
-                let key = (coarser_index, l as u16);
+                let key = (coarser_index, l);
                 if let Some(old_best) = best_finer_cell_contribution.get_mut(&key) {
                     if benefit > old_best.get_benefit() {
                         // we found a cell at finest layer  that has better benefit at this level of tree
-                        *(old_best) =
-                            BenefitUnit::new(cell.key().clone(), l as u16, max_layer, benefit);
+                        *(old_best) = BenefitUnit::new(cell.key().clone(), l, max_layer, benefit);
                     }
                 } else {
                     best_finer_cell_contribution.insert(
                         key,
-                        BenefitUnit::new(cell.key().clone(), l as u16, max_layer, benefit),
+                        BenefitUnit::new(cell.key().clone(), l, max_layer, benefit),
                     );
                 }
                 // loop update
@@ -829,12 +825,12 @@ where
         for cell in finest_layer.get_hcells().iter() {
             let mut best_unit: Option<&BenefitUnit> = None;
             for l in (0..max_layer).rev() {
-                let coarser_index = cell.get_larger_cell_index_at_layer(l as u16);
+                let coarser_index = cell.get_larger_cell_index_at_layer(l);
                 // is this cell the best at upper_index ?
-                let key = (coarser_index, l as u16);
+                let key = (coarser_index, l);
                 if let Some(unit) = best_finer_cell_contribution.get(&key) {
                     let (idx, level) = unit.get_id();
-                    assert_eq!(level, l as u16);
+                    assert_eq!(level, l);
                     if idx == cell.get_cell_index() {
                         best_unit = Some(unit);
                     }
@@ -915,7 +911,7 @@ where
                 panic!("should not occur")
             }
             //
-            let idx_l = unit.get_index_at_layer(layer as u16);
+            let idx_l = unit.get_index_at_layer(layer);
             // get cell
             let ref_cell_opt = self.get_cell(&idx_l, layer);
             if ref_cell_opt.is_none() {

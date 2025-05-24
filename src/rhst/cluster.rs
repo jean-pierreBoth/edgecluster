@@ -241,10 +241,7 @@ impl ClusterResult {
         log::info!("dim : {}", dim);
         // first we compute mean of each cluster
         // TODO: to make //
-        let mut cluster_mean: Vec<Vec<T>> = (0..nb_cluster)
-            .into_iter()
-            .map(|_| vec![T::zero(); dim])
-            .collect();
+        let mut cluster_mean: Vec<Vec<T>> = (0..nb_cluster).map(|_| vec![T::zero(); dim]).collect();
         let mut cluster_size = vec![0usize; nb_cluster];
         for point in points {
             let xyz = point.get_position();
@@ -493,7 +490,8 @@ where
     /// The arguments are:  
     /// - number of clusters asked for
     /// - auto_dim : set to true, the algorithm will try to reduce data dimension using module [crate::smalld]
-    /// - if a reduction  to a given dimension is necessary, this option will use it.
+    /// - if a reduction  to a given dimension is necessary, this option will use it.  
+    ///
     /// The function returns a map giving for each point id its cluster
     pub fn cluster(
         &mut self,
@@ -520,10 +518,7 @@ where
         log::debug!("dim : {} xmin : {:.3e}, xmax : {:.3e}", dim, xmin, xmax);
         // TODO: do we need to keep points in HCluster (we clone a vec of references)
         let points_to_cluster: Vec<&Point<T>>;
-        let reduced_dim = match reduced_dim_opt {
-            Some(d) => d,
-            _ => 0,
-        };
+        let reduced_dim = reduced_dim_opt.unwrap_or_default();
         if (dim > self.points.len().ilog(2) as usize && self.auto_dim) || reduced_dim > 0 {
             let mut to_dim: usize = self.points.len().ilog(2) as usize;
             if reduced_dim > 0 {

@@ -21,7 +21,7 @@ impl<T> Point<T>
 where
     T: Float + Debug,
 {
-    ///
+    ///a point is characteized by its Id (in fact a rank)
     pub fn new(id: PointId, p: Vec<T>, label: u32) -> Self {
         Point { id, p, label }
     }
