@@ -592,18 +592,15 @@ where
             nb_cluster
         );
         //
-        let mut centers_pid = vec![0usize; nb_cluster];
-        for item in &cluster_to_center_pid {
-            centers_pid[*item.key() as usize] = *item.value();
-        }
-        //
+        let res = ClusterResult::new(point_reaffectation, cluster_to_center_pid, nb_cluster);
+        //        res.compute_cost_medoid_recenter_l2(&self.points, None);
         println!(
             " Cluster (dimension reduction + embedding + partitioning) time(s) {:?} cpu time {:?}",
             sys_now.elapsed().unwrap().as_secs(),
             cpu_start.elapsed().as_secs()
         );
         //
-        ClusterResult::new(point_reaffectation, cluster_to_center_pid, nb_cluster)
+        res
     }
 
     // pt_affectation constains the cluster rank,
