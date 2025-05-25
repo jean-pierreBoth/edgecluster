@@ -30,20 +30,20 @@ pub fn main() {
     //
     let _ = env_logger::builder().is_test(true).try_init().unwrap();
 
-    let csv_format = true;
+    let csv_format = false;
     //
     let (labels, images_as_v) = if csv_format {
-        log::info!(
-            "in mnist_digits, reading mnist data in CSV format ...from {}",
-            MNIST_DIGITS_DIR_NOT_CSV
-        );
-        io_from_non_csv(MNIST_DIGITS_DIR_NOT_CSV).unwrap()
-    } else {
         log::info!(
             "in mnist_digits, reading mnist data original idx bianry ...from {}",
             MNIST_DIGITS_DIR_CSV
         );
         io_from_csv(MNIST_DIGITS_DIR_CSV).unwrap()
+    } else {
+        log::info!(
+            "in mnist_digits, reading mnist data in CSV format ...from {}",
+            MNIST_DIGITS_DIR_NOT_CSV
+        );
+        io_from_non_csv(MNIST_DIGITS_DIR_NOT_CSV).unwrap()
     };
     //
     // define points
@@ -74,7 +74,7 @@ pub fn main() {
     let sys_now = SystemTime::now();
     // distance is normalized by pixel. Value of pixel between 0 and 256
     //===================================
-    let nb_cluster_asked = 30;
+    let nb_cluster_asked = 20;
     let auto_dim = false;
     let _small_dim = Some(3);
     //===================================

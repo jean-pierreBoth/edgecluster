@@ -237,38 +237,43 @@ pub fn io_from_non_csv(not_csv_dir: &str) -> anyhow::Result<(Vec<u8>, Vec<Vec<f3
         ("t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte"),
     ];
     // one pass on train data, one pass on test data
-    for _ in 0..2 {
+    for i in 0..fnames.len() {
         let mut image_path = PathBuf::from(not_csv_dir);
-        image_path.push(fnames[0].0);
+        image_path.push(fnames[i].0);
         let image_file_res = OpenOptions::new().read(true).open(&image_path);
         if image_file_res.is_err() {
             println!("could not open image file : {:?}", image_path);
             return Err(anyhow!("could not open image file : {:?}", image_path));
         }
         let mut label_path = PathBuf::from(not_csv_dir);
-        label_path.push(fnames[0].1);
+        label_path.push(fnames[i].1);
         let label_file_res = OpenOptions::new().read(true).open(&label_path);
         if label_file_res.is_err() {
             println!("could not open label file : {:?}", label_path);
             return Err(anyhow!("could not open label file : {:?}", label_path));
         }
 
-        {
-            let mnist_data = MnistData::new(image_path.clone(), label_path.clone()).unwrap();
-            let images = mnist_data.get_images();
-            labels.append(&mut mnist_data.get_labels().to_vec());
-            let (_, _, nbimages) = images.dim();
-            //
-            for k in 0..nbimages {
-                let v: Vec<f32> = images
-                    .slice(s![.., .., k])
-                    .iter()
-                    .map(|v| *v as f32 / (28. * 28.))
-                    .collect();
-                images_as_v.push(v);
-            }
-        } // drop mnist_data
-    }
+        assert_eq!(images_as_v.len(), labels.len());
+        log::info!("io_from_non_csv loaded {}", images_as_v.len());
+        //
+        let mnist_data = MnistData::new(image_path.clone(), label_path.clone()).unwrap();
+        let images = mnist_data.get_images();
+        labels.append(&mut mnist_data.get_labels().to_vec());
+        let (_, _, nbimages) = images.dim();
+        //
+        for k in 0..nbimages {
+            let v: Vec<f32> = images
+                .slice(s![.., .., k])
+                .iter()
+                .map(|v| *v as f32 / (28. * 28.))
+                .collect();
+            images_as_v.push(v);
+        }
+    } // drop mnist_data
+      //
+    assert_eq!(labels.len(), images_as_v.len());
+    log::info!("o_from_non_csv loaded {}", images_as_v.len());
+    //
     return Ok((labels, images_as_v));
 }
 
@@ -306,6 +311,8 @@ pub fn io_from_csv(not_csv_dir: &str) -> anyhow::Result<(Vec<u8>, Vec<Vec<f32>>)
             }
         } // drop mnist_data
     } // end of for on names
-      //
+    assert_eq!(images_as_v.len(), labels.len());
+    log::info!("io_from_csv loaded {}", images_as_v.len());
+    //
     Ok((labels, images_as_v))
 }
