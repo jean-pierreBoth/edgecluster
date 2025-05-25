@@ -94,13 +94,14 @@ impl ClusterResult {
     where
         LabelId: Copy + Clone + std::fmt::Display,
     {
+        let mut nb_info = 1;
         for item in &self.cluster_center_to_pid {
             let rank = *item.key();
             let center_pid = *item.value();
             if labels.is_none() {
                 println!(
                     "cluster : {} , center_id : {}, size : {}",
-                    rank,
+                    nb_info,
                     center_pid,
                     self.clusters[rank as usize].len()
                 );
@@ -108,12 +109,13 @@ impl ClusterResult {
                 let label_id = labels.as_ref().unwrap()[center_pid];
                 println!(
                     "cluster : {} , center_id : {}, label : {}, size : {}",
-                    rank,
+                    nb_info,
                     center_pid,
                     label_id,
                     self.clusters[rank as usize].len()
                 );
             }
+            nb_info += 1;
         }
     }
 
