@@ -94,24 +94,24 @@ impl ClusterResult {
     where
         LabelId: Copy + Clone + std::fmt::Display,
     {
-        for (rank, v) in self.clusters.iter().enumerate() {
-            let r_u32: u32 = rank.try_into().unwrap();
-            let center_id = *self.cluster_center_to_pid.get(&r_u32).unwrap().value();
+        for item in &self.cluster_center_to_pid {
+            let rank = *item.key();
+            let center_pid = *item.value();
             if labels.is_none() {
                 println!(
                     "cluster : {} , center_id : {}, size : {}",
                     rank,
-                    center_id,
-                    v.len()
+                    center_pid,
+                    self.clusters[rank as usize].len()
                 );
             } else {
-                let label_id = labels.as_ref().unwrap()[center_id];
+                let label_id = labels.as_ref().unwrap()[center_pid];
                 println!(
                     "cluster : {} , center_id : {}, label : {}, size : {}",
                     rank,
-                    center_id,
+                    center_pid,
                     label_id,
-                    v.len()
+                    self.clusters[rank as usize].len()
                 );
             }
         }
@@ -165,13 +165,19 @@ impl ClusterResult {
     /// $ \sum_{1}^{N}  ||x_{i} - C(x_{i})|| $ where $C(x_{i})$ is the nearest cluster center for $ x_{i}$.
     /// result will be written in a csv file with name $filename$
     pub fn compute_cost_medoid_l2<
-        T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign,
+        T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign + serde::Serialize,
     >(
         &self,
         points: &[&Point<T>],
         dumpfile: Option<&str>,
     ) -> T {
-        log::info!("in ClusterResult compute_cost_medoid_l2");
+        log::info!("in ClusterResult compute_cost_medoid_l2, checking centers membership");
+        // check centers
+        for item in &self.cluster_center_to_pid {
+            let cluster = item.key();
+            let pid = item.value();
+            assert_eq!(*cluster, *self.point_to_cluster.get(pid).unwrap().value());
+        }
         //
         let mut norm = T::zero();
         for item in self.point_to_cluster.iter() {
@@ -188,6 +194,12 @@ impl ClusterResult {
                 .sqrt()
         }
         //
+        #[derive(Debug, Serialize)]
+        struct Record<'a, T> {
+            cluster: u32,
+            data: &'a [T],
+        }
+        //
         if let Some(csvloc) = dumpfile {
             let mut csvpath = PathBuf::from(".");
             csvpath.push(csvloc);
@@ -199,7 +211,7 @@ impl ClusterResult {
             if csvfileres.is_err() {
                 println!(" could not open file {:?}", csvpath.as_os_str());
             }
-            let wtr = WriterBuilder::new().from_path(&csvpath);
+            let wtr = WriterBuilder::new().has_headers(false).from_path(&csvpath);
             if wtr.is_err() {
                 log::error!("compute_cost_medoid_l1 cannot open dump csv file");
             } else {
@@ -209,11 +221,17 @@ impl ClusterResult {
                     let cluster = *item.key();
                     let center_id = *self.cluster_center_to_pid.get(&cluster).unwrap().value();
                     let center_point = points[center_id];
-                    let csv_record = CsvRecord::from(center_point.get_position());
-                    wtr.serialize(csv_record.center_str).unwrap();
+                    let record = Record {
+                        cluster,
+                        data: center_point.get_position(),
+                    };
+                    wtr.serialize(record).unwrap();
                 }
             }
+            log::info!("csv dump in {}", csvloc);
         }
+        //
+        log::info!("exiting ClusterResult::compute_cost_medoid_l2");
         //
         norm
     }

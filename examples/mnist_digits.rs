@@ -30,7 +30,7 @@ pub fn main() {
     //
     let _ = env_logger::builder().is_test(true).try_init().unwrap();
 
-    let csv_format = false;
+    let csv_format = true;
     //
     let (labels, images_as_v) = if csv_format {
         log::info!(
