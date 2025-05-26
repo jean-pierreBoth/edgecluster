@@ -132,6 +132,11 @@ impl ClusterResult {
         self.clusters[i].len()
     }
 
+    /// returns number of clusters
+    pub fn get_nb_cluster(&self) -> usize {
+        self.clusters.len()
+    }
+
     /// returns the number of data to cluster
     pub fn get_nb_points(&self) -> usize {
         self.point_to_cluster.len()
@@ -212,7 +217,8 @@ impl ClusterResult {
         //
         if let Some(csvloc) = dumpfile {
             let mut csvpath = PathBuf::from(".");
-            csvpath.push(csvloc);
+            let csvloc_sized = self.get_nb_cluster().to_string() + "-" + csvloc;
+            csvpath.push(csvloc_sized);
             let csvfileres = OpenOptions::new()
                 .create(true)
                 .truncate(true)
@@ -221,6 +227,7 @@ impl ClusterResult {
             if csvfileres.is_err() {
                 println!(" could not open file {:?}", csvpath.as_os_str());
             }
+            // CAVEAT: we need to set header to false to have serialization!!
             let wtr = WriterBuilder::new().has_headers(false).from_path(&csvpath);
             if wtr.is_err() {
                 log::error!("compute_cost_medoid_l1 cannot open dump csv file");

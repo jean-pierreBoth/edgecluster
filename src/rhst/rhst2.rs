@@ -11,8 +11,6 @@
 //  Zaheer, Guruganesh, Levin Smola
 //  as we can group points very close (under lower distance threshold) in one cell
 //
-// TODO: We must be able to have more than 16 layers, to be able to have cell indexed
-// go beyond 2^16 so we need to encode cell indexes in a u32!
 
 use cpu_time::ProcessTime;
 use std::time::{Duration, SystemTime};
@@ -930,13 +928,13 @@ where
             let unit_cell = ref_cell.value();
             if loop_min_size <= 100 && idx_l.len() <= 10 {
                 log::info!(
-                "cell idx : {:?}, at layer : {}, benefit : {:.2e}, nb points : {}, id at finest layer : {:?}",
-                idx_l,
-                layer,
-                unit.get_benefit(),
-                unit_cell.get_nb_points(),
-                id_max
-            );
+                    "cell idx : {:?}, at layer : {}, benefit : {:.2e}, nb points : {}, id at finest layer : {:?}",
+                    idx_l,
+                    layer,
+                    unit.get_benefit(),
+                    unit_cell.get_nb_points(),
+                    id_max
+                );
             }
 
             let points = unit_cell.get_points().unwrap();
