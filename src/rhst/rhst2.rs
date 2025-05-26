@@ -875,27 +875,46 @@ where
     /// This runs on possibly embedded points
     pub(crate) fn get_partition(
         &self,
-        p_size: usize,
+        p_size_arg: &Vec<usize>,
         benefit_units: &[BenefitUnit],
-    ) -> (DashMap<PointId, u32>, DashMap<u32, PointId>) {
+    ) -> (DashMap<PointId, Vec<u32>>, DashMap<u32, PointId>) {
         //
         let cpu_start = ProcessTime::now();
         let sys_now = SystemTime::now();
-        //
+        // we need to be sure partitions size are given in increasing order
+        let mut p_size = p_size_arg.clone();
+        p_size.sort_unstable();
+        let largest_partition_size = *p_size.last().unwrap();
+        let nb_partition = p_size.len();
         let nb_points = self.get_nb_points();
         log::info!(
-            "in SpaceMesh::get_partiton dispatching nbpoints: {}, in {} clusters",
+            "in SpaceMesh::get_partiton dispatching nbpoints: {}, in {:?} clusters",
             nb_points,
             p_size
         );
         let layer_max = self.get_nb_layers() - 1;
-        // to each point its cluster
-        let clusters = DashMap::<PointId, u32>::with_capacity(nb_points);
-        // to each cluster rank, the pid of point found as its center
-        let centers = DashMap::<u32, PointId>::with_capacity(p_size);
         //
-        let loop_min_size = p_size.min(benefit_units.len());
+        // to each point  a vector giving its cluster in each partition
+        // at the beginning each point is in max benefit cell (coarset layer id 0-th layer)
+        //
+        let clusters = DashMap::<PointId, Vec<u32>>::with_capacity(nb_points);
+        for point in self.points.as_ref().unwrap() {
+            clusters.insert(point.get_id(), vec![u32::MAX; nb_partition]);
+        }
+        // now we have initialized clusters
+        //
+        // to each cluster rank, the pid of point found as its center
+        let centers = DashMap::<u32, PointId>::with_capacity(largest_partition_size);
+        //
+        let loop_min_size = largest_partition_size.min(benefit_units.len());
+        let mut target_rank = 0; // at the beginning we try to make first partition
         for i in 0..loop_min_size {
+            if i > p_size[target_rank] {
+                if target_rank < p_size.len() - 1 {
+                    target_rank += 1;
+                    log::info!("setting target partition size to {}", p_size[target_rank]);
+                }
+            }
             log::debug!("in SpaceMesh::get_partition benefit unit : {}", i);
             let unit = &benefit_units[i];
             let (id_max, layer) = unit.get_id();
@@ -953,7 +972,7 @@ where
                     let ref_cell_j = self.get_cell(&idx_j, layer_j).unwrap();
                     if ref_cell_j.has_point(point.get_id()) {
                         break true;
-                    } else if j < p_size - 1 {
+                    } else if j < p_size[target_rank] - 1 {
                         j += 1;
                     } else {
                         break false;
@@ -961,7 +980,8 @@ where
                 };
                 if !found {
                     // point is exclusively in cell i
-                    if let Some(old) = clusters.insert(point.get_id(), i as u32) {
+                    clusters.get_mut(&point.get_id()).unwrap()[target_rank] = i as u32;
+                    /*                     if let Some(old) = clusters.insert(point.get_id(), i as u32) {
                         log::error!(
                             "point id {:?} was already inserted in cluster : {:?}",
                             point.get_id(),
@@ -972,7 +992,7 @@ where
                             clusters.len()
                         );
                         panic!();
-                    }
+                    } */
                     log::trace!(
                         "point {:?} x... = {:?}  inserted in cluster {}",
                         point.get_id(),
@@ -992,7 +1012,7 @@ where
             clusters.len()
         );
         //
-        assert_eq!(centers.len(), p_size);
+        assert_eq!(centers.len(), *p_size.last().unwrap());
         let cpu_time: Duration = cpu_start.elapsed();
         log::info!(
             "SpaceMesh::get_partiton  sys time(ms) {:?} cpu time {:?}",

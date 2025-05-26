@@ -74,54 +74,56 @@ pub fn main() {
     let sys_now = SystemTime::now();
     // distance is normalized by pixel. Value of pixel between 0 and 256
     //===================================
-    let nb_cluster_asked = 20;
+    let nb_cluster_asked = vec![10, 15, 25];
     let auto_dim = false;
     let _small_dim = Some(3);
     //===================================
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(ref_points, None);
-    let cluster_res = hcluster.cluster(nb_cluster_asked, auto_dim, _small_dim);
-    let algo_affectation = cluster_res.get_dash_affectation();
-    // We construct a corresponding Affectation structure to compare clusters with true labels
-    let ref_hashmap = DashMap::<usize, u32>::new();
-    for (i, l) in labels.iter().enumerate() {
-        ref_hashmap.insert(i, *l as u32);
+    let cluster_res = hcluster.cluster(&nb_cluster_asked, auto_dim, _small_dim);
+    for (i, p) in cluster_res.iter().enumerate() {
+        log::info!(" \n\n results with {} clusters", nb_cluster_asked[i]);
+        log::info!("\n ====================================================");
+        let algo_affectation = p.get_dash_affectation();
+        // We construct a corresponding Affectation structure to compare clusters with true labels
+        let ref_hashmap = DashMap::<usize, u32>::new();
+        for (i, l) in labels.iter().enumerate() {
+            ref_hashmap.insert(i, *l as u32);
+        }
+        let ref_affectation = DashAffectation::new(&ref_hashmap);
+        //
+        let cpu_time: Duration = cpu_start.elapsed();
+        println!(
+            "  sys time(ms) {:?} cpu time(ms) {:?}",
+            sys_now.elapsed().unwrap().as_millis(),
+            cpu_time.as_millis()
+        );
+        //
+        let refpoints = hcluster.get_points();
+        let output = Some("digits_centers.csv");
+        println!(
+            "medoid l2 cost : {:.3e}",
+            p.compute_cost_medoid_l2(&refpoints, output)
+        );
+        p.dump_cluster_id(Some(&labels));
+        // merit comparison
+        println!("merit ctatus");
+        //
+        let contingency = Contingency::<DashAffectation<usize, u32>, usize, u32>::new(
+            ref_affectation,
+            algo_affectation,
+        );
+        contingency.dump_entropies();
+        let nmi_joint: f64 = contingency.get_nmi_joint();
+        println!("mnist digits results with {} clusters", nb_cluster_asked[i]);
+        println!("mnit disgit nmi joint : {:.3e}", nmi_joint);
+
+        let nmi_mean: f64 = contingency.get_nmi_mean();
+        println!("mnist digits results with {} clusters", nb_cluster_asked[i]);
+        println!("mnit disgit nmi mean : {:.3e}", nmi_mean);
+
+        let nmi_sqrt: f64 = contingency.get_nmi_sqrt();
+        println!("mnist digits results with {} clusters", nb_cluster_asked[i]);
+        println!("mnit disgit nmi sqrt : {:.3e}", nmi_sqrt);
     }
-    let ref_affectation = DashAffectation::new(&ref_hashmap);
-    //
-    let cpu_time: Duration = cpu_start.elapsed();
-    println!(
-        "  sys time(ms) {:?} cpu time(ms) {:?}",
-        sys_now.elapsed().unwrap().as_millis(),
-        cpu_time.as_millis()
-    );
-    //
-    let refpoints = hcluster.get_points();
-    let output = Some("digits_centers.csv");
-    println!(
-        "medoid l2 cost : {:.3e}",
-        cluster_res.compute_cost_medoid_l2(&refpoints, output)
-    );
-    cluster_res.dump_cluster_id(Some(labels));
-    //
-
-    // merit comparison
-    println!("merit ctatus");
-    //
-    let contingency = Contingency::<DashAffectation<usize, u32>, usize, u32>::new(
-        ref_affectation,
-        algo_affectation,
-    );
-    contingency.dump_entropies();
-    let nmi_joint: f64 = contingency.get_nmi_joint();
-    println!("mnist digits results with {} clusters", nb_cluster_asked);
-    println!("mnit disgit nmi joint : {:.3e}", nmi_joint);
-
-    let nmi_mean: f64 = contingency.get_nmi_mean();
-    println!("mnist digits results with {} clusters", nb_cluster_asked);
-    println!("mnit disgit nmi mean : {:.3e}", nmi_mean);
-
-    let nmi_sqrt: f64 = contingency.get_nmi_sqrt();
-    println!("mnist digits results with {} clusters", nb_cluster_asked);
-    println!("mnit disgit nmi sqrt : {:.3e}", nmi_sqrt);
 }

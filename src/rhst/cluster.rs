@@ -51,6 +51,7 @@ impl CsvRecord {
 
 //===========================
 
+#[derive(Clone)]
 pub struct ClusterResult {
     /// a map from  points id to a cluster num or label
     point_to_cluster: DashMap<usize, u32>,
@@ -98,7 +99,7 @@ impl ClusterResult {
 
     /// dump info on clusters: centerid , size, possibly labels of centers
     /// labels : a vector containing points labels
-    pub fn dump_cluster_id<LabelId>(&self, labels: Option<Vec<LabelId>>)
+    pub fn dump_cluster_id<LabelId>(&self, labels: Option<&Vec<LabelId>>)
     where
         LabelId: Copy + Clone + std::fmt::Display,
     {
@@ -521,6 +522,17 @@ where
         self.points[0].get_dimension()
     }
 
+    pub fn cluster_one(
+        &mut self,
+        nb_cluster: usize,
+        auto_dim: bool,
+        reduced_dim_opt: Option<usize>,
+    ) -> ClusterResult {
+        let partitons_size = vec![nb_cluster];
+        let res = self.cluster(&partitons_size, auto_dim, reduced_dim_opt);
+        res[0].clone()
+    }
+
     /// The function that triggers the clustering.  
     /// The arguments are:  
     /// - number of clusters asked for
@@ -530,10 +542,10 @@ where
     /// The function returns a map giving for each point id its cluster
     pub fn cluster(
         &mut self,
-        nb_cluster: usize,
+        partitions_size: &Vec<usize>,
         auto_dim: bool,
         reduced_dim_opt: Option<usize>,
-    ) -> ClusterResult {
+    ) -> Vec<ClusterResult> {
         //
         let cpu_start = ProcessTime::now();
         let sys_now = SystemTime::now();
@@ -609,26 +621,49 @@ where
         //
         // we have benefits, we can try to cluster
         //
-        let (point_to_cluster, cluster_to_center_pid) =
-            spacemesh.get_partition(nb_cluster, &filtered_benefits);
-        assert_eq!(cluster_to_center_pid.len(), nb_cluster);
-
-        // keep centers and reaffect, computing new cost
-        let (point_reaffectation, medoid_cost) =
-            self.compute_reaffectation_cost_medoid_l2(&point_to_cluster, &cluster_to_center_pid);
-        log::info!(
-            "medoid cost in original space after reaffectation (l2) : {:.3e} with {} clusters",
-            medoid_cost,
-            nb_cluster
-        );
+        let (point_in_clusters, cluster_to_center_pid) =
+            spacemesh.get_partition(&partitions_size, &filtered_benefits);
         //
-        let res = ClusterResult::new(
-            point_reaffectation,
-            cluster_to_center_pid,
-            nb_cluster,
-            medoid_cost,
-        );
-        //        res.compute_cost_medoid_recenter_l2(&self.points, None);
+        let nb_partitions = partitions_size.len();
+        let mut res = Vec::<ClusterResult>::with_capacity(nb_partitions);
+        for i in 0..partitions_size.len() {
+            // rebuild point affectation for each partition
+            let point_to_cluster: DashMap<usize, u32> = DashMap::<usize, u32>::new();
+            let cluster_to_center_pid_for_this_partition = DashMap::<u32, usize>::new();
+            let nb_cluster = partitions_size[i];
+            for c in 0..nb_cluster as u32 {
+                let item = cluster_to_center_pid.get(&c).unwrap();
+                let p_id = *item.value();
+                cluster_to_center_pid_for_this_partition.insert(c, p_id);
+            }
+
+            for item in &point_in_clusters {
+                let p_id = item.key();
+                let c = item.value()[i];
+                point_to_cluster.insert(*p_id, c);
+            }
+
+            // keep centers and reaffect, computing new cost
+            let (point_reaffectation, medoid_cost) = self.compute_reaffectation_cost_medoid_l2(
+                &point_to_cluster,
+                &cluster_to_center_pid_for_this_partition,
+            );
+            log::info!(
+                "medoid cost in original space after reaffectation (l2) : {:.3e} with {} clusters",
+                medoid_cost,
+                partitions_size[i]
+            );
+            //
+            let partition = ClusterResult::new(
+                point_reaffectation,
+                cluster_to_center_pid_for_this_partition,
+                partitions_size[i],
+                medoid_cost,
+            );
+            //        res.compute_cost_medoid_recenter_l2(&self.points, None);
+            //
+            res.push(partition);
+        }
         println!(
             " Cluster (dimension reduction + embedding + partitioning) time(s) {:?} cpu time {:?}",
             sys_now.elapsed().unwrap().as_secs(),
@@ -861,7 +896,8 @@ mod tests {
         let mut hcluster = Hcluster::new(refpoints, None);
         hcluster.set_debug_level(1);
         let auto_dim = false;
-        let cluster_res = hcluster.cluster(nb_cluster_asked, auto_dim, None);
+        //
+        let cluster_res = hcluster.cluster_one(nb_cluster_asked, auto_dim, None);
         cluster_res.dump_cluster_id::<usize>(None);
         let algo_affectation = cluster_res.get_dash_affectation();
         //
@@ -916,7 +952,7 @@ mod tests {
         //
         let mut hcluster = Hcluster::new(refpoints, None);
         let auto_dim = false;
-        let cluster_res = hcluster.cluster(nb_cluster_asked, auto_dim, None);
+        let cluster_res = hcluster.cluster_one(nb_cluster_asked, auto_dim, None);
         cluster_res.dump_cluster_id::<usize>(None);
         //
         let algo_affectation = cluster_res.get_dash_affectation();
