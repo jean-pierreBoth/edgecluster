@@ -881,6 +881,9 @@ where
         benefit_units: &[BenefitUnit],
     ) -> (DashMap<PointId, u32>, DashMap<u32, PointId>) {
         //
+        let cpu_start = ProcessTime::now();
+        let sys_now = SystemTime::now();
+        //
         let nb_points = self.get_nb_points();
         log::info!(
             "in SpaceMesh::get_partiton dispatching nbpoints: {}, in {} clusters",
@@ -959,7 +962,7 @@ where
                     }
                 };
                 if !found {
-                    // point is exclusevily in cell i
+                    // point is exclusively in cell i
                     if let Some(old) = clusters.insert(point.get_id(), i as u32) {
                         log::error!(
                             "point id {:?} was already inserted in cluster : {:?}",
@@ -992,19 +995,20 @@ where
         );
         //
         assert_eq!(centers.len(), p_size);
-        let _cost = self.compute_medoid_cost(&clusters, &centers);
-        if log::log_enabled!(log::Level::Debug) {
-            log::info!("nb points : {}", self.get_nb_points());
-            let cost = self.compute_medoid_cost(&clusters, &centers);
-            log::debug!("compute_medoid_cost from partition : {:.3e}", cost);
-        }
+        let cpu_time: Duration = cpu_start.elapsed();
+        log::info!(
+            "SpaceMesh::get_partiton  sys time(ms) {:?} cpu time {:?}",
+            sys_now.elapsed().unwrap().as_millis(),
+            cpu_time.as_millis()
+        );
         //
         (clusters, centers)
     }
 
     // cluster_center gives for a cluster rank, the rank of the point in self.points
     // pt_affectation gives for each point its cluster num
-    pub(crate) fn compute_medoid_cost(
+    #[allow(unused)]
+    pub(crate) fn compute_medoid_cost_l1(
         &self,
         pt_affectation: &DashMap<usize, u32>,
         cluster_center: &DashMap<u32, usize>,

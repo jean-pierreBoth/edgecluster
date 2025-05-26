@@ -58,6 +58,8 @@ pub struct ClusterResult {
     cluster_center_to_pid: DashMap<u32, usize>,
     /// for each cluster a vector of point id affected to it
     clusters: Vec<Vec<usize>>,
+    ///
+    cost_l2: f64,
 }
 
 impl ClusterResult {
@@ -65,6 +67,7 @@ impl ClusterResult {
         point_to_cluster: DashMap<usize, u32>,
         cluster_center_to_pid: DashMap<u32, usize>,
         nb_cluster: usize,
+        cost_l2: f64,
     ) -> ClusterResult {
         //
         let mut clusters: Vec<Vec<usize>> = (0..nb_cluster).map(|_| Vec::<usize>::new()).collect();
@@ -75,6 +78,7 @@ impl ClusterResult {
             point_to_cluster,
             cluster_center_to_pid,
             clusters,
+            cost_l2,
         }
     }
 
@@ -86,6 +90,10 @@ impl ClusterResult {
     /// for each cluster a vector of point id affected to it
     pub fn get_clusters(&self) -> &Vec<Vec<usize>> {
         &self.clusters
+    }
+
+    pub fn get_l2_medoid_cost(&self) -> f64 {
+        self.cost_l2
     }
 
     /// dump info on clusters: centerid , size, possibly labels of centers
@@ -600,14 +608,19 @@ where
 
         // keep centers and reaffect, computing new cost
         let (point_reaffectation, medoid_cost) =
-            self.compute_cost_medoid_l2(&point_to_cluster, &cluster_to_center_pid);
+            self.compute_reaffectation_cost_medoid_l2(&point_to_cluster, &cluster_to_center_pid);
         log::info!(
             "medoid cost in original space after reaffectation (l2) : {:.3e} with {} clusters",
             medoid_cost,
             nb_cluster
         );
         //
-        let res = ClusterResult::new(point_reaffectation, cluster_to_center_pid, nb_cluster);
+        let res = ClusterResult::new(
+            point_reaffectation,
+            cluster_to_center_pid,
+            nb_cluster,
+            medoid_cost,
+        );
         //        res.compute_cost_medoid_recenter_l2(&self.points, None);
         println!(
             " Cluster (dimension reduction + embedding + partitioning) time(s) {:?} cpu time {:?}",
@@ -622,7 +635,7 @@ where
     // cluster_center contains the point_id designated as the center , resulting from benefit analysis
     // returns mean L2 cost
     #[allow(unused)]
-    pub(crate) fn compute_cost_medoid_l2(
+    pub(crate) fn compute_reaffectation_cost_medoid_l2(
         &self,
         pt_affectation: &DashMap<usize, u32>,
         cluster_center: &DashMap<u32, usize>,
@@ -631,7 +644,7 @@ where
         log::info!("in HCluster compute_cost_medoid_l2");
         //
         assert_eq!(self.points.len(), pt_affectation.len());
-
+        //
         let new_affectation = DashMap::<usize, u32>::new();
         let norm: AtomicF64 = AtomicF64::new(0.);
         let without_reaffectation_norm = AtomicF64::new(0.);
@@ -652,18 +665,18 @@ where
                     .iter()
                     .zip(center_pt)
                     .fold(T::zero(), |acc, (p, c)| acc + (*p - *c) * (*p - *c));
-                let dist = num_traits::Float::sqrt(dist2);
+                let dist = num_traits::Float::sqrt(dist2).to_f64().unwrap();
                 log::trace!(
                     "point : {},  center : {}, dist : {:.3e}",
                     point.get_id(),
                     center_rank,
-                    dist.to_f64().unwrap()
+                    dist
                 );
                 if cluster_rank == *pt_affectation.get(&point_rank).unwrap().value() {
-                    without_reaffectation_norm.fetch_add(dist.to_f64().unwrap(), Ordering::Acquire);
+                    without_reaffectation_norm.fetch_add(dist, Ordering::Acquire);
                 }
-                if dist.to_f64().unwrap() < mindist {
-                    mindist = dist.to_f64().unwrap();
+                if dist < mindist {
+                    mindist = dist;
                     minclust = i;
                 }
                 new_affectation.insert(point_rank, minclust as u32);
@@ -691,7 +704,7 @@ where
             norm_f64
         );
         (new_affectation, norm_f64)
-    } // end of compute_cost_medoid_l2
+    } // end of compute_reaffectation_cost_medoid_l2
 
     //
 
