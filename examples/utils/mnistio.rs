@@ -2,6 +2,7 @@
 //!
 //!
 //!
+#![allow(unused)]
 
 use anyhow::anyhow;
 use ndarray::{s, Array1, Array2, Array3, Axis};

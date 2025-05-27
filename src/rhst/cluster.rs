@@ -450,6 +450,8 @@ pub struct Hcluster<'a, T> {
     reducer: Option<&'a dyn reducer::Reducer<T>>,
     // dimension of reduced points if reduction was used
     reduced_dim: Option<usize>,
+    //
+    user_layer_max: Option<u16>,
     // if we (must) reduce points dimension,
     reduced_points: Option<Vec<Point<T>>>,
 }
@@ -501,6 +503,7 @@ where
             reducer,
             reduced_dim: None,
             reduced_points: None,
+            user_layer_max: None,
         }
     } // end of new
 
@@ -522,14 +525,19 @@ where
         self.points[0].get_dimension()
     }
 
+    pub fn get_user_layer_max(&self) -> Option<u16> {
+        self.user_layer_max
+    }
+
     pub fn cluster_one(
         &mut self,
         nb_cluster: usize,
         auto_dim: bool,
         reduced_dim_opt: Option<usize>,
+        user_layer_max: Option<u16>,
     ) -> ClusterResult {
         let partitons_size = vec![nb_cluster];
-        let res = self.cluster(&partitons_size, auto_dim, reduced_dim_opt);
+        let res = self.cluster(&partitons_size, auto_dim, reduced_dim_opt, user_layer_max);
         res[0].clone()
     }
 
@@ -545,6 +553,7 @@ where
         partitions_size: &Vec<usize>,
         auto_dim: bool,
         reduced_dim_opt: Option<usize>,
+        user_layer_max: Option<u16>,
     ) -> Vec<ClusterResult> {
         //
         let cpu_start = ProcessTime::now();
@@ -598,7 +607,7 @@ where
         log::info!("dim : {}, xmin : {:.3e}, xmax : {:.3e}", dim, xmin, xmax);
         // construct spacemesh
         let mut space = Space::new(dim, xmin, xmax);
-        let mut spacemesh = SpaceMesh::new(&mut space, points_to_cluster);
+        let mut spacemesh = SpaceMesh::new(&mut space, points_to_cluster, user_layer_max);
         spacemesh.embed();
 
         if self.debug_level > 1 {
@@ -875,6 +884,7 @@ mod tests {
         let dim = 2;
         let width: f64 = 1.;
         let nb_cluster_asked = 5;
+        let user_layer_max = None;
         //=====================================
         let unif_01 = Uniform::<f64>::new(0., width).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(234567_u64);
@@ -897,7 +907,7 @@ mod tests {
         hcluster.set_debug_level(1);
         let auto_dim = false;
         //
-        let cluster_res = hcluster.cluster_one(nb_cluster_asked, auto_dim, None);
+        let cluster_res = hcluster.cluster_one(nb_cluster_asked, auto_dim, None, user_layer_max);
         cluster_res.dump_cluster_id::<usize>(None);
         let algo_affectation = cluster_res.get_dash_affectation();
         //
@@ -952,7 +962,7 @@ mod tests {
         //
         let mut hcluster = Hcluster::new(refpoints, None);
         let auto_dim = false;
-        let cluster_res = hcluster.cluster_one(nb_cluster_asked, auto_dim, None);
+        let cluster_res = hcluster.cluster_one(nb_cluster_asked, auto_dim, None, None);
         cluster_res.dump_cluster_id::<usize>(None);
         //
         let algo_affectation = cluster_res.get_dash_affectation();

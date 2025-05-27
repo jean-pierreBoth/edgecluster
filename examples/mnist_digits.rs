@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime};
 use edgecluster::rhst::*;
 mod utils;
 use edgecluster::merit::*;
-use utils::mnistio::*;
+use mnist::io::*;
 
 // for data in old non csv format
 const MNIST_DIGITS_DIR_NOT_CSV: &str = "/home/jpboth/Data/ANN/MNIST";
@@ -77,10 +77,11 @@ pub fn main() {
     let nb_cluster_asked = vec![10, 15, 25];
     let auto_dim = false;
     let _small_dim = Some(3);
+    let user_layer_max = None;
     //===================================
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(ref_points, None);
-    let cluster_res = hcluster.cluster(&nb_cluster_asked, auto_dim, _small_dim);
+    let cluster_res = hcluster.cluster(&nb_cluster_asked, auto_dim, _small_dim, user_layer_max);
     for (i, p) in cluster_res.iter().enumerate() {
         log::info!(" \n\n results with {} clusters", nb_cluster_asked[i]);
         log::info!("\n ====================================================");

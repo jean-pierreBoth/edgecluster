@@ -49,6 +49,12 @@ log = { version = "0.4", features = [
 # log = { version = "0.4" }
 env_logger = { version = "0.11" }
 
+# for mnist io
+#mnist = { path = "../coreset/mnist"}
+mnist = { git = "https://github.com/jean-pierreBoth/coreset" }
+
+
+
 [features]
 
 default = ["openblas-system"]

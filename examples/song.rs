@@ -148,12 +148,13 @@ fn main() {
     let nb_cluster_asked = 100;
     let auto_dim = false;
     let _small_dim = Some(3);
+    let user_layer_max = None;
     //===================================
     //
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(ref_points, None);
     //
-    let cluster_res = hcluster.cluster_one(nb_cluster_asked, auto_dim, None);
+    let cluster_res = hcluster.cluster_one(nb_cluster_asked, auto_dim, None, user_layer_max);
     //
     // We construct a corresponding Affectation structure to compare clusters with true labels
     let ref_hashmap = DashMap::<usize, u32>::new();

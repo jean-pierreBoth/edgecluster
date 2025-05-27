@@ -81,7 +81,6 @@ pub struct Space {
     // maximum space coordinate
     upper: f64,
     //
-    nb_layer: usize,
 }
 
 impl Space {
@@ -103,7 +102,6 @@ impl Space {
             margin,
             origin,
             upper,
-            nb_layer: 0,
         }
     }
 
@@ -141,7 +139,6 @@ impl Space {
             self.xmin + self.width,
             self.get_margin()
         );
-        log::info!("nb layer : {}", self.nb_layer);
         //
     }
 }
@@ -172,7 +169,7 @@ where
     T: Float + Debug + std::fmt::LowerExp,
 {
     pub fn new(space: &'a Space, layer: u16, index: Vec<u32>) -> Self {
-        assert!(layer < 32);
+        assert!(layer < u32::BITS as u16);
         Cell {
             space,
             layer,
@@ -284,7 +281,7 @@ where
     // This function parse points and allocate a subcell when a point requires it.
     // recall the tree grow upward. finer mesh is last layer, contrary to the paper
     fn split(&self) -> Option<Vec<Cell<'a, T>>> {
-        //
+        // layer must be less than u32::BITS - 1
         assert!(self.layer < 32);
         //
         if self.points_in.is_none() {
@@ -525,6 +522,8 @@ pub struct SpaceMesh<'a, T: Float> {
     layers: Vec<Layer<'a, T>>,
     //
     points: Option<Vec<&'a Point<T>>>,
+    /// By default the maximum layer is at u32::BITS -1 (i.e 31)
+    user_layer_max: Option<u16>,
 }
 
 impl<'a, T> SpaceMesh<'a, T>
@@ -535,14 +534,19 @@ where
     /// - data points to cluster
     /// - mindist to discriminate points. under this distance points will be associated
     ///
-    pub fn new(space: &'a mut Space, points: Vec<&'a Point<T>>) -> Self {
+    pub fn new(
+        space: &'a mut Space,
+        points: Vec<&'a Point<T>>,
+        user_layer_max: Option<u16>,
+    ) -> Self {
         //
-        let layers: Vec<Layer<T>> = Vec::with_capacity(space.nb_layer);
+        let layers: Vec<Layer<T>> = Vec::with_capacity(1 + user_layer_max.unwrap_or(15) as usize);
         //
         SpaceMesh {
             space,
             layers,
             points: Some(points),
+            user_layer_max,
         }
     }
 
@@ -682,6 +686,7 @@ where
         let coarser_layer: &Layer<'a, T> = &self.layers[0_usize];
         coarser_layer.insert_cells(vec![global_cell]);
         // now we can propagate layer downward, cells can be treated // using par_iter_mut
+        let maximum_layer = self.user_layer_max.unwrap_or(u32::BITS as u16 - 1);
         loop {
             log::info!("splitting layer : l : {}", l);
             let new_layer = l + 1;
@@ -706,7 +711,7 @@ where
             if self.layers[new_layer as usize].get_nb_cells() >= self.get_nb_points() {
                 break;
             } else {
-                if new_layer as u32 == u32::BITS - 1 {
+                if new_layer == maximum_layer {
                     log::info!("stopping at max layer : {}", new_layer);
                     break;
                 }
@@ -1209,7 +1214,7 @@ mod tests {
         let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         // Space definition
         let mut space = Space::new(dim, 0., width);
-        let mut mesh = SpaceMesh::new(&mut space, refpoints);
+        let mut mesh = SpaceMesh::new(&mut space, refpoints, None);
 
         //
         mesh.embed();
@@ -1284,7 +1289,7 @@ mod tests {
         // Space definition
         let mut space = Space::new(dim, 0., width);
 
-        let mut mesh = SpaceMesh::new(&mut space, refpoints);
+        let mut mesh = SpaceMesh::new(&mut space, refpoints, None);
         mesh.embed();
         mesh.summary();
         //
