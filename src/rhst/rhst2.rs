@@ -823,9 +823,10 @@ where
         }
         // now we collect for each cell at finest layer,  the coarser level layer ( > 0 in the paper, but < max_layer in our implementation)
         // at which it is the best contribution
-        // TODO: the loop should be made // but for Mnist 70000 pts useless
-        let mut higher_best_finer_layer_contribution = HashMap::<Vec<u32>, BenefitUnit>::new();
-        for cell in finest_layer.get_hcells().iter() {
+        //  // loop , useless but for Mnist 70000 pts , 5% faster on higgs
+        let higher_best_finer_layer_contribution = DashMap::<Vec<u32>, BenefitUnit>::new();
+        finest_layer.get_hcells().into_par_iter().for_each(|item| {
+            let cell = item.value();
             let mut best_unit: Option<&BenefitUnit> = None;
             for l in (0..max_layer).rev() {
                 let coarser_index = cell.get_larger_cell_index_at_layer(l);
@@ -843,13 +844,15 @@ where
                 higher_best_finer_layer_contribution
                     .insert(cell.get_cell_index().to_vec(), b_unit.clone());
             }
-        }
+        });
         // We have now among the list of finest_layer, cells that have maximum benefits, the coarser layers of their contribution
         // sort benefits in decreasing (!) order
         // We can transfert to a Vec<BenefitUit> as BenefitUnit stores cell0 index
         log::info!("sorting benefits");
-        let mut benefits: Vec<BenefitUnit> =
-            higher_best_finer_layer_contribution.into_values().collect();
+        let mut benefits: Vec<BenefitUnit> = higher_best_finer_layer_contribution
+            .iter()
+            .map(|item| item.value().clone())
+            .collect();
         benefits.par_sort_unstable_by(|unita, unitb| {
             unitb.benefit.partial_cmp(&unita.benefit).unwrap()
         });
@@ -914,13 +917,21 @@ where
         let loop_min_size = largest_partition_size.min(benefit_units.len());
         let mut target_rank = 0; // at the beginning we try to make first partition
         for i in 0..loop_min_size {
-            if i > p_size[target_rank] {
+            if i >= p_size[target_rank] {
                 if target_rank < p_size.len() - 1 {
                     target_rank += 1;
                     log::info!("setting target partition size to {}", p_size[target_rank]);
                 }
             }
-            log::debug!("in SpaceMesh::get_partition benefit unit : {}", i);
+            // we must transfer result from previous partition to
+            if target_rank > 0 {
+                clusters.iter_mut().for_each(|mut item| {
+                    (*item)[target_rank] = (*item)[target_rank - 1];
+                });
+            }
+            if i > 0 && i % 10 == 0 {
+                log::info!("in SpaceMesh::get_partition benefit unit : {}", i);
+            }
             let unit = &benefit_units[i];
             let (id_max, layer) = unit.get_id();
             // get the id of point for which this unit was created and set it as cluster center

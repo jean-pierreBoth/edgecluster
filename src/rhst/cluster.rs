@@ -639,16 +639,28 @@ where
             // rebuild point affectation for each partition
             let point_to_cluster: DashMap<usize, u32> = DashMap::<usize, u32>::new();
             let cluster_to_center_pid_for_this_partition = DashMap::<u32, usize>::new();
+            //
             let nb_cluster = partitions_size[i];
             for c in 0..nb_cluster as u32 {
                 let item = cluster_to_center_pid.get(&c).unwrap();
                 let p_id = *item.value();
                 cluster_to_center_pid_for_this_partition.insert(c, p_id);
             }
-
+            // point affectation at this partition
             for item in &point_in_clusters {
                 let p_id = item.key();
                 let c = item.value()[i];
+                if log::log_enabled!(log::Level::Info) {
+                    if (c as usize) >= partitions_size[i] {
+                        log::error!(
+                            "partition i : {} c : {}, partitions_size[i] : {}",
+                            i,
+                            c,
+                            partitions_size[i]
+                        );
+                    }
+                }
+                assert!((c as usize) < partitions_size[i]);
                 point_to_cluster.insert(*p_id, c);
             }
 
@@ -723,7 +735,7 @@ where
                     center_rank,
                     dist
                 );
-                if cluster_rank == *pt_affectation.get(&point_rank).unwrap().value() {
+                if cluster_rank == *pt_affectation.get(&point.get_id()).unwrap().value() {
                     without_reaffectation_norm.fetch_add(dist, Ordering::Acquire);
                 }
                 if dist < mindist {
@@ -744,16 +756,12 @@ where
                 nb_changed += 1;
             }
         }
-        log::info!(
-            "HCluster compute_cost_medoid_l2 cost before reaffectation : {:.3e}, nb change of affectation : {}",
-            without_reaffectation_norm.into_inner(), nb_changed
-        );
-        //
         let norm_f64 = norm.into_inner();
         log::info!(
-            "exiting HCluster compute_cost_medoid_l2, cost after reaffectation : {:.3e}",
-            norm_f64
+            "HCluster compute_cost_medoid_l2 cost without reaffectation : {:.3e}, nb change of affectation : {}, cost after reaffectation : {:.3e}",
+            without_reaffectation_norm.into_inner(), nb_changed, norm_f64
         );
+        //
         (new_affectation, norm_f64)
     } // end of compute_reaffectation_cost_medoid_l2
 

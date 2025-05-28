@@ -248,10 +248,10 @@ pub fn main() {
     let cpu_start = ProcessTime::now();
     //
     //===================================
-    let nb_cluster_asked = vec![2, 10, 50];
+    let nb_cluster_asked = vec![10, 100, 200];
     let auto_dim = false;
     let _small_dim = Some(3);
-    let user_layer_max = Some(12);
+    let user_layer_max = Some(9);
     //===================================
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(ref_points, None);
@@ -278,7 +278,7 @@ pub fn main() {
         );
         //
         let refpoints = hcluster.get_points();
-        let output = Some("digits_centers.csv");
+        let output = Some("higgs_centers.csv");
         println!(
             "medoid l2 cost : {:.3e}",
             p.compute_cost_medoid_l2(&refpoints, output)
