@@ -50,8 +50,12 @@ log = { version = "0.4", features = [
 env_logger = { version = "0.11" }
 
 # for mnist io
-#mnist = { path = "../coreset/mnist"}
+# mnist = { path = "../coreset/mnist"}
 mnist = { git = "https://github.com/jean-pierreBoth/coreset" }
+#mnist = { path = "../coreset/mnist" }
+
+nmi = { git = "https://github.com/jean-pierreBoth/coreset" }
+#nmi = { path = "../coreset/nmi"}
 
 
 
@@ -67,3 +71,4 @@ openblas-system = ["ndarray/blas", "lax/openblas-system"]
 [dev-dependencies]
 
 clap = { version = "4.4", features = ["derive"] }
+# nmi = { git = "https://github.com/jean-pierreBoth/coreset" }

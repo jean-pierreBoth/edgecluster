@@ -1,16 +1,10 @@
 //! describes affectation of data to clusters
-#![allow(unused)]
 
 use dashmap::DashMap;
-use indexmap::IndexSet;
-use ndarray::{Array1, Array2};
-use std::collections::hash_map::Iter;
+
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use num_traits::int::PrimInt;
-use num_traits::sign::Unsigned;
-use std::marker::PhantomData;
 /// The cluster affectation of any clustering scheme should be able to provide a structure implementing this trait.
 ///
 /// Typically an affectation abstract a clusterization as something giving the label or the rank of the cluster attached to a dataid.  
@@ -54,7 +48,7 @@ where
 
 /// an iterator over affectations
 pub struct HashAffectationIter<'a, DataId, DataLabel> {
-    from: &'a HashAffectation<DataId, DataLabel>,
+    _from: &'a HashAffectation<DataId, DataLabel>,
     iter: std::collections::hash_map::Iter<'a, DataId, DataLabel>,
 }
 
@@ -66,7 +60,7 @@ where
     //
     pub fn new(from: &'a HashAffectation<DataId, DataLabel>) -> Self {
         HashAffectationIter {
-            from,
+            _from: from,
             iter: from.affectation.iter(),
         }
     }
@@ -124,7 +118,7 @@ where
 
 /// an iterator over affectations defined using a DashMap
 pub struct DashAffectationIter<'a, DataId, DataLabel> {
-    from: &'a DashAffectation<'a, DataId, DataLabel>,
+    _from: &'a DashAffectation<'a, DataId, DataLabel>,
     iter: dashmap::iter::Iter<'a, DataId, DataLabel>,
 }
 
@@ -136,7 +130,7 @@ where
     //
     pub fn new(from: &'a DashAffectation<DataId, DataLabel>) -> Self {
         DashAffectationIter {
-            from,
+            _from: from,
             iter: from.affectation.iter(),
         }
     }
@@ -170,7 +164,7 @@ where
     DataLabel: Hash + Eq + Copy + Clone + Send + Sync + std::fmt::Debug,
 {
     /// builds a vector affectation
-    pub fn new(affectation: Vec<DataLabel>, nb_cluster: usize) -> Self {
+    pub fn new(affectation: Vec<DataLabel>, _nb_cluster: usize) -> Self {
         VecAffectation { affectation }
     }
 }

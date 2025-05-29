@@ -25,8 +25,8 @@ use std::time::{Duration, SystemTime};
 
 use csv;
 
-use edgecluster::merit::*;
 use edgecluster::rhst::*;
+use nmi::*;
 
 const SONG_DIR: &str = "/home/jpboth/Data/BenchClustering/";
 

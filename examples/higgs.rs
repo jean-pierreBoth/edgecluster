@@ -52,7 +52,7 @@ use std::time::{Duration, SystemTime};
 
 use edgecluster::rhst::*;
 mod utils;
-use edgecluster::merit::*;
+use nmi::*;
 
 const HIGGS_DIR: &str = "/home/jpboth/Data";
 
@@ -286,7 +286,7 @@ pub fn main() {
         p.dump_cluster_id(Some(&labels));
         // merit comparison
         println!("merit ctatus");
-        //
+        // reference is first arg so it will correspond to rows
         let contingency = Contingency::<DashAffectation<usize, u32>, usize, u32>::new(
             ref_affectation,
             algo_affectation,
@@ -303,6 +303,14 @@ pub fn main() {
         let nmi_sqrt: f64 = contingency.get_nmi_sqrt();
         println!("mnist digits results with {} clusters", nb_cluster_asked[i]);
         println!("mnit disgit nmi sqrt : {:.3e}", nmi_sqrt);
+        //
+        // detailed contingency analysis. Here we have reference indexed by rows in contingency table
+        //
+        let digits = contingency.get_labels_rank(0);
+        log::info!(
+            "labels are in the following order of columns in reference : {:?}",
+            digits
+        );
     }
     println!(
         " clustering total sys time(s) {:.2e}  cpu time {:.2e}",

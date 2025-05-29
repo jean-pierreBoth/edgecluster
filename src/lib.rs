@@ -11,6 +11,5 @@ fn init_log() -> u64 {
     1
 }
 
-pub mod merit;
 pub mod rhst;
 pub mod smalld;

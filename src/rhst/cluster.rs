@@ -26,7 +26,7 @@ use super::point::*;
 use super::rhst2::*;
 use crate::smalld::*;
 
-use crate::merit::affect::*;
+use nmi::affect::*;
 
 //   just to dump centers
 
@@ -870,7 +870,7 @@ where
 mod tests {
 
     use super::*;
-    use crate::merit::*;
+    use nmi::*;
 
     use rand::distr::Uniform;
     use rand::prelude::*;
