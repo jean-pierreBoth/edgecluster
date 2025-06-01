@@ -50,6 +50,8 @@ use ndarray::{Array2, ArrayView};
 use cpu_time::ProcessTime;
 use std::time::{Duration, SystemTime};
 
+use clustering::{kmeans, Elem};
+
 use edgecluster::rhst::*;
 mod utils;
 use nmi::*;
@@ -160,6 +162,52 @@ fn reformat(data: &mut Array2<f32>, rescale: bool) -> Vec<Vec<f32>> {
     datavec
 } // end of reformat
 
+// just to compare computing times
+fn do_kmeans(points: &Vec<Point<f32>>, nb_iter: usize, nb_cluster: usize) {
+    log::info!("doing do_kmeans comparison");
+    // going to kmean
+    log::info!("doing kmean clustering on whole data .... takes time");
+    let nb_iter = 50;
+    let nb_cluster = 200;
+    let data_points: Vec<&[f32]> = points.iter().map(|p| p.get_position()).collect();
+    //
+    let cpu_start: ProcessTime = ProcessTime::now();
+    let sys_now = SystemTime::now();
+    //
+    let clustering = kmeans(nb_cluster, &data_points, nb_iter);
+    println!(
+        "kmeans total sys time(s) {:.2e}  cpu time {:.2e}",
+        sys_now.elapsed().unwrap().as_secs(),
+        cpu_start.elapsed().as_secs()
+    );
+    // compute error
+    let centroids = &clustering.centroids;
+    // conver centroids to vectors
+    let mut centers = Vec::<Vec<f32>>::with_capacity(nb_cluster);
+    for c in centroids {
+        let dim = c.dimensions();
+        let mut center = Vec::<f32>::with_capacity(dim);
+        for i in 0..dim {
+            center.push(c.at(i) as f32);
+        }
+        centers.push(center);
+    }
+    let elements = clustering.elements;
+    let membership = clustering.membership;
+    let mut error = 0.0;
+    for i in 0..elements.len() {
+        let cluster = membership[i];
+        let dist = elements[i]
+            .iter()
+            .zip(centers[cluster].iter())
+            .fold(0., (|acc, (a, b)| acc + (*a - *b) * (*a - *b)))
+            .sqrt();
+
+        error += dist;
+    }
+    log::info!("kmean error : {:.3e}", error / data_points.len() as f32);
+}
+
 //====================================================================================
 
 ///  By defaut a umap like embedding is done.
@@ -239,9 +287,6 @@ pub fn main() {
         println!("label : {}, count : {}", l, count);
     }
     //
-    let cpu_start: ProcessTime = ProcessTime::now();
-    let sys_now = SystemTime::now();
-    //
     // now we do clustering
     //
     let sys_now = SystemTime::now();
@@ -278,12 +323,15 @@ pub fn main() {
         );
         //
         let refpoints = hcluster.get_points();
-        let output = Some("higgs_centers.csv");
+        let output = Some("higgs_centers-2.csv");
         println!(
             "medoid l2 cost : {:.3e}",
             p.compute_cost_medoid_l2(&refpoints, output)
         );
         p.dump_cluster_id(Some(&labels));
+        //
+        let (_, kmean_cost) = p.compute_cluster_kmean_centers::<f32>(&refpoints);
+        log::info!("kmeans cost : {:.3e}", kmean_cost);
         // merit comparison
         println!("merit ctatus");
         // reference is first arg so it will correspond to rows
@@ -293,28 +341,51 @@ pub fn main() {
         );
         contingency.dump_entropies();
         let nmi_joint: f64 = contingency.get_nmi_joint();
-        println!("mnist digits results with {} clusters", nb_cluster_asked[i]);
-        println!("mnit disgit nmi joint : {:.3e}", nmi_joint);
+        println!("higgs results with {} clusters", nb_cluster_asked[i]);
+        println!("higgs nmi joint : {:.3e}", nmi_joint);
 
         let nmi_mean: f64 = contingency.get_nmi_mean();
-        println!("mnist digits results with {} clusters", nb_cluster_asked[i]);
-        println!("mnit disgit nmi mean : {:.3e}", nmi_mean);
+        println!("higgs results with {} clusters", nb_cluster_asked[i]);
+        println!("higgs nmi mean : {:.3e}", nmi_mean);
 
         let nmi_sqrt: f64 = contingency.get_nmi_sqrt();
-        println!("mnist digits results with {} clusters", nb_cluster_asked[i]);
-        println!("mnit disgit nmi sqrt : {:.3e}", nmi_sqrt);
+        println!("higgs results with {} clusters", nb_cluster_asked[i]);
+        println!("higgs nmi sqrt : {:.3e}", nmi_sqrt);
         //
         // detailed contingency analysis. Here we have reference indexed by rows in contingency table
         //
-        let digits = contingency.get_labels_rank(0);
-        log::info!(
-            "labels are in the following order of columns in reference : {:?}",
-            digits
-        );
+        let labels = contingency.get_labels_rank(0);
+        let (nb_row, nb_col) = contingency.get_dim();
+        log::info!("\n \n display rows entropies");
+        let row_entropies = contingency.get_row_entropies();
+        for (i, c) in row_entropies.iter().enumerate() {
+            log::info!("cluster : {}, row : {}, entropy : {:.3e}", labels[i], i, c,);
+        }
+        log::info!("\n");
+        for i in 0..nb_row {
+            log::info!("row : {} {}", i, contingency.get_row(i));
+        }
+        // display entropies by column
+        // reference is second argument in Contingency allocation, so it in columns
+        //
+        log::info!("\n \n display colmuns entropies");
+        let col_entropies = contingency.get_col_entropies();
+        for (i, c) in col_entropies.iter().enumerate() {
+            log::info!(
+                "cluster : {}, entropy : {:.3e}, col : {}",
+                i,
+                c,
+                contingency.get_col(i)
+            );
+        }
     }
     println!(
         " clustering total sys time(s) {:.2e}  cpu time {:.2e}",
         sys_now.elapsed().unwrap().as_secs(),
         cpu_start.elapsed().as_secs()
     );
+    //
+    // kmeans comparison
+    //
+    do_kmeans(&points, 50, 200);
 } // end of main

@@ -921,17 +921,13 @@ where
                 if target_rank < p_size.len() - 1 {
                     target_rank += 1;
                     log::info!("setting target partition size to {}", p_size[target_rank]);
+                    // we must transfer result from previous partition to
+                    clusters.iter_mut().for_each(|mut item| {
+                        (*item)[target_rank] = (*item)[target_rank - 1];
+                    });
                 }
             }
-            // we must transfer result from previous partition to
-            if target_rank > 0 {
-                clusters.iter_mut().for_each(|mut item| {
-                    (*item)[target_rank] = (*item)[target_rank - 1];
-                });
-            }
-            if i > 0 && i % 10 == 0 {
-                log::info!("in SpaceMesh::get_partition benefit unit : {}", i);
-            }
+            log::info!("in SpaceMesh::get_partition benefit unit : {}", i);
             let unit = &benefit_units[i];
             let (id_max, layer) = unit.get_id();
             // get the id of point for which this unit was created and set it as cluster center
@@ -973,13 +969,15 @@ where
             }
 
             let points = unit_cell.get_points().unwrap();
+            log::info!("nb point to dispacth {}", points.len());
             // what is exclusively in unit i and not in sub-sequent units
             let nbpoint_i = AtomicUsize::new(0);
+            // let mut nbpoint_i = 0;
             points.par_iter().for_each(|point| {
                 let mut j = i + 1;
 
                 let found: bool = loop {
-                    if j >= benefit_units.len() {
+                    if j >= p_size[target_rank] {
                         break false;
                     }
                     let unit_j = &benefit_units[j];
@@ -1016,9 +1014,12 @@ where
                         i
                     );
                 } // end !found
-                let old = nbpoint_i.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if log::log_enabled!(log::Level::Debug) && old % 10000 == 0 {
-                    log::debug!("nb points dispacthed to clusters : {}", old);
+                if log::log_enabled!(log::Level::Info) {
+                    //    nbpoint_i += 1;
+                    let old = nbpoint_i.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if old % 10_000 == 0 {
+                        log::info!("nb points dispacthed to clusters : {}", old);
+                    }
                 }
             }); // end for on points
         } // end for i <= p_size

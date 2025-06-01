@@ -143,13 +143,13 @@ impl ClusterResult {
         self.point_to_cluster.len()
     }
 
-    /// compute centers as in kmean for l2 cost
-    pub fn compute_cluster_mean_center<
-        T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign,
+    /// compute centers as in kmean for l2 cost. To compare to medoid cost
+    pub fn compute_cluster_kmean_centers<
+        T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign + Sync + Send,
     >(
         &self,
         points: &[&Point<T>],
-    ) -> Vec<Vec<T>> {
+    ) -> (Vec<Vec<T>>, f64) {
         //
         log::info!("\n in compute_cluster_mean_center");
         //
@@ -172,8 +172,21 @@ impl ClusterResult {
                 *x /= T::from(self.clusters[cluster].len()).unwrap();
             }
         }
+        // now compute dispatching cost
+        let cost = AtomicF64::new(0.);
+        self.point_to_cluster.par_iter().for_each(|item| {
+            let point = points[*item.key()];
+            let xyz = point.get_position();
+            let center = &centers[*item.value() as usize];
+            let dist = xyz
+                .iter()
+                .zip(center.iter())
+                .fold(T::zero(), |acc, (a, b)| acc + (*a - *b) * (*a - *b))
+                .sqrt();
+            cost.fetch_add(dist.to_f64().unwrap(), Ordering::Acquire);
+        });
         //
-        centers
+        (centers, cost.into_inner())
     }
 
     #[cfg_attr(doc, katexit::katexit)]
@@ -616,7 +629,7 @@ where
         //
         spacemesh.summary();
 
-        let filtered_benefits = spacemesh.compute_benefits();
+        let mut filtered_benefits = spacemesh.compute_benefits();
         if log::log_enabled!(log::Level::Trace) {
             log::trace!(
                 "dump of filtered_benefits, nbunits : {}",
@@ -627,6 +640,7 @@ where
         if log::log_enabled!(log::Level::Debug) {
             check_benefits_cover(&spacemesh, &filtered_benefits);
         }
+        filtered_benefits.truncate(partitions_size.last().unwrap() + 2);
         //
         // we have benefits, we can try to cluster
         //

@@ -71,4 +71,6 @@ openblas-system = ["ndarray/blas", "lax/openblas-system"]
 [dev-dependencies]
 
 clap = { version = "4.4", features = ["derive"] }
-# nmi = { git = "https://github.com/jean-pierreBoth/coreset" }
+# clustering = { path = "../clustering"}
+clustering = { version = "0.2.1", features=["parallel"]}
+# clustering = { git = "https://github.com/jean-pierreBoth/clustering", branch = "jpb" }
