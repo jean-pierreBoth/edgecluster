@@ -21,6 +21,7 @@ use std::fmt::Debug;
 
 use anyhow::anyhow;
 use dashmap::{iter, mapref::one, rayon::*, DashMap};
+use parking_lot::RwLock;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -905,16 +906,24 @@ where
         // to each point  a vector giving its cluster in each partition
         // at the beginning each point is in max benefit cell (coarset layer id 0-th layer)
         //
-        let clusters = DashMap::<PointId, Vec<u32>>::with_capacity(nb_points);
+        let mut clusters: Vec<RwLock<Vec<u32>>> =
+            Vec::<RwLock<Vec<u32>>>::with_capacity(self.get_nb_points());
+        for _ in 0..self.get_nb_points() {
+            clusters.push(RwLock::new(vec![u32::MAX; nb_partition]));
+        }
+
+        /*         let clusters = DashMap::<PointId, Vec<u32>>::with_capacity(nb_points);
         for point in self.points.as_ref().unwrap() {
             clusters.insert(point.get_id(), vec![u32::MAX; nb_partition]);
-        }
+        } */
+
         // now we have initialized clusters
         //
         // to each cluster rank, the pid of point found as its center
         let centers = DashMap::<u32, PointId>::with_capacity(largest_partition_size);
         //
         let loop_min_size = largest_partition_size.min(benefit_units.len());
+        log::info!("loop_min_size : {}", loop_min_size);
         let mut target_rank = 0; // at the beginning we try to make first partition
         for i in 0..loop_min_size {
             if i >= p_size[target_rank] {
@@ -922,8 +931,9 @@ where
                     target_rank += 1;
                     log::info!("setting target partition size to {}", p_size[target_rank]);
                     // we must transfer result from previous partition to
-                    clusters.iter_mut().for_each(|mut item| {
-                        (*item)[target_rank] = (*item)[target_rank - 1];
+                    clusters.iter_mut().for_each(|item| {
+                        let mut v = item.write();
+                        (*v)[target_rank] = (*v)[target_rank - 1];
                     });
                 }
             }
@@ -993,8 +1003,9 @@ where
                     }
                 };
                 if !found {
+                    clusters[point.get_id()].write()[target_rank] = i as u32;
                     // point is exclusively in cell i
-                    clusters.get_mut(&point.get_id()).unwrap()[target_rank] = i as u32;
+                    //        clusters.get_mut(&point.get_id()).unwrap()[target_rank] = i as u32;
                     /*                     if let Some(old) = clusters.insert(point.get_id(), i as u32) {
                         log::error!(
                             "point id {:?} was already inserted in cluster : {:?}",
@@ -1014,7 +1025,7 @@ where
                         i
                     );
                 } // end !found
-                if log::log_enabled!(log::Level::Info) {
+                if log::log_enabled!(log::Level::Debug) {
                     //    nbpoint_i += 1;
                     let old = nbpoint_i.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if old % 10_000 == 0 {
@@ -1036,8 +1047,13 @@ where
             sys_now.elapsed().unwrap().as_millis(),
             cpu_time.as_millis()
         );
+        // transform to a DashMap
+        let clusters_hash = DashMap::<PointId, Vec<u32>>::with_capacity(nb_points);
+        for (i, v) in clusters.iter().enumerate() {
+            clusters_hash.insert(i, v.read().to_vec());
+        }
         //
-        (clusters, centers)
+        (clusters_hash, centers)
     }
 
     // cluster_center gives for a cluster rank, the rank of the point in self.points
