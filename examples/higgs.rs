@@ -247,7 +247,7 @@ pub fn main() {
     // first column is label. We have one column more than variables
     //====================
     let nb_col = 29;
-    let rescale = true;
+    let rescale = false;
     // quality estimation requires subsampling factor of 0.15 is Ok with 64Gb
     let sampling_factor = 1.;
     //====================
@@ -323,7 +323,7 @@ pub fn main() {
         );
         //
         let refpoints = hcluster.get_points();
-        let output = Some("higgs_centers-2.csv");
+        let output = Some("higgs_centers-raw2.csv");
         println!(
             "medoid l2 cost : {:.3e}",
             p.compute_cost_medoid_l2(&refpoints, output)
@@ -387,5 +387,5 @@ pub fn main() {
     //
     // kmeans comparison
     //
-    do_kmeans(&points, 50, 200);
+    // do_kmeans(&points, 50, 200);
 } // end of main

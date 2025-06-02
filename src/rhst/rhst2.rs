@@ -21,6 +21,7 @@ use std::fmt::Debug;
 
 use anyhow::anyhow;
 use dashmap::{iter, mapref::one, rayon::*, DashMap};
+use indexmap::IndexSet;
 use parking_lot::RwLock;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rayon::prelude::*;
@@ -163,6 +164,8 @@ pub(crate) struct Cell<'a, T> {
     subtree_size: usize,
     //
     points_in: Option<Vec<&'a Point<T>>>,
+    //
+    point_index: IndexSet<usize>,
 }
 
 impl<'a, T> Cell<'a, T>
@@ -177,6 +180,7 @@ where
             index,
             subtree_size: 0,
             points_in: None,
+            point_index: IndexSet::<usize>::new(),
         }
     }
 
@@ -219,12 +223,13 @@ where
         if self.points_in.is_none() {
             false
         } else {
-            for p in self.points_in.as_ref().unwrap() {
+            self.point_index.contains(&pid)
+            /*             for p in self.points_in.as_ref().unwrap() {
                 if p.get_id() == pid {
                     return true;
                 }
             }
-            false
+            false */
         }
     }
     // get parent cell in splitting process
@@ -258,13 +263,17 @@ where
                 self.points_in = Some(vec);
             }
         }
+        self.point_index.insert(point.get_id());
     }
 
     // fill in points
     fn init_points(&mut self, points: &[&'a Point<T>]) {
         assert!(self.points_in.is_none());
         self.points_in = Some(<Vec<&'a Point<T>>>::from(points));
-    }
+        for p in points {
+            self.point_index.insert(p.get_id());
+        }
+    } // end of init_points
 
     // given layer and index in mesh, returns cooridnates of center of mesh in space
     // at coarser (pareint in splitting) layer cell width is space width divided by 2 and so on
