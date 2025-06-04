@@ -59,7 +59,7 @@ pub struct ClusterResult {
     cluster_center_to_pid: DashMap<u32, usize>,
     /// for each cluster a vector of point id affected to it
     clusters: Vec<Vec<usize>>,
-    ///
+    //
     cost_l2: f64,
 }
 
@@ -526,7 +526,7 @@ where
 
     /// returns references to points
     pub fn get_points(&self) -> &Vec<Point<T>> {
-        &self.points
+        self.points
     }
 
     /// get reduced dimension if reduced
@@ -563,7 +563,7 @@ where
     /// The function returns a map giving for each point id its cluster
     pub fn cluster(
         &mut self,
-        partitions_size: &Vec<usize>,
+        partitions_size: &[usize],
         auto_dim: bool,
         reduced_dim_opt: Option<usize>,
         user_layer_max: Option<u16>,
@@ -586,21 +586,21 @@ where
         let dim = self.points[0].get_dimension();
         log::debug!("dim : {} xmin : {:.3e}, xmax : {:.3e}", dim, xmin, xmax);
         // TODO: do we need to keep points in HCluster (we clone a vec of references)
-        let points_to_cluster: &Vec<Point<T>>;
         let reduced_dim = reduced_dim_opt.unwrap_or_default();
-        if (dim > self.points.len().ilog(2) as usize && self.auto_dim) || reduced_dim > 0 {
-            let mut to_dim: usize = self.points.len().ilog(2) as usize;
-            if reduced_dim > 0 {
-                to_dim = to_dim.min(reduced_dim);
-            }
-            log::info!("reducing dimension from : {} to : {}", dim, to_dim);
-            // we reduce dimension
-            self.reduced_points = Some(self.reduce_points(to_dim));
-            points_to_cluster = self.reduced_points.as_ref().unwrap()
-        } else {
-            log::info!("clustering keeping original dimension: {} ", dim);
-            points_to_cluster = &self.points;
-        }
+        let points_to_cluster =
+            if (dim > self.points.len().ilog(2) as usize && self.auto_dim) || reduced_dim > 0 {
+                let mut to_dim: usize = self.points.len().ilog(2) as usize;
+                if reduced_dim > 0 {
+                    to_dim = to_dim.min(reduced_dim);
+                }
+                log::info!("reducing dimension from : {} to : {}", dim, to_dim);
+                // we reduce dimension
+                self.reduced_points = Some(self.reduce_points(to_dim));
+                self.reduced_points.as_ref().unwrap()
+            } else {
+                log::info!("clustering keeping original dimension: {} ", dim);
+                self.points
+            };
         // we have points_to_cluster , we can construct space
         let (xmin, xmax) = points_to_cluster
             .iter()
@@ -642,17 +642,16 @@ where
         // we have benefits, we can try to cluster
         //
         let (point_in_clusters, cluster_to_center_pid) =
-            spacemesh.get_partition(&partitions_size, &filtered_benefits);
+            spacemesh.get_partition(partitions_size, &filtered_benefits);
         //
         let nb_partitions = partitions_size.len();
         let mut res = Vec::<ClusterResult>::with_capacity(nb_partitions);
-        for i in 0..partitions_size.len() {
+        for (i, nb_cluster) in partitions_size.iter().enumerate() {
             // rebuild point affectation for each partition
             let point_to_cluster: DashMap<usize, u32> = DashMap::<usize, u32>::new();
             let cluster_to_center_pid_for_this_partition = DashMap::<u32, usize>::new();
             //
-            let nb_cluster = partitions_size[i];
-            for c in 0..nb_cluster as u32 {
+            for c in 0..*nb_cluster as u32 {
                 let item = cluster_to_center_pid.get(&c).unwrap();
                 let p_id = *item.value();
                 cluster_to_center_pid_for_this_partition.insert(c, p_id);

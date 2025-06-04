@@ -208,11 +208,25 @@ where
 
     // returns an option on rank set
     #[allow(unused)]
-    pub(crate) fn get_points_set(&self) -> Option<&IndexSet<usize>> {
+    pub(crate) fn get_points_set_ref(&self) -> Option<&IndexSet<usize>> {
         if self.layer > 0 {
             Some(&self.point_index)
         } else {
             None
+        }
+    }
+
+    // makes an index for global cell
+    #[allow(unused)]
+    fn get_point_set(&self) -> anyhow::Result<IndexSet<usize>> {
+        if self.get_layer() == 0 {
+            let mut idx = IndexSet::<usize>::with_capacity(self.get_nb_points());
+            for i in 0..self.all_points.len() {
+                idx.insert(i);
+            }
+            Ok(idx)
+        } else {
+            Err(anyhow!("call only for root cell"))
         }
     }
 
@@ -224,10 +238,14 @@ where
         *self.point_index.first().unwrap()
     }
 
-    pub fn get_point_index(&self) -> &IndexSet<usize> {
-        &self.point_index
+    fn get_point_rank_vec(&self) -> Vec<usize> {
+        let v: Vec<usize> = match self.layer {
+            0 => (0..self.all_points.len()).collect::<Vec<usize>>(),
+            _ => self.point_index.iter().copied().collect(),
+            //
+        };
+        v
     }
-
     #[allow(unused)]
     // returns true if a point is in sub tree of cell
     pub(crate) fn has_point(&self, pid: PointId) -> bool {
@@ -290,31 +308,18 @@ where
         position
     } // end of get_cell_center
 
-    fn get_point_rank_vec(&self) -> Vec<usize> {
-        let v: Vec<usize> = match self.layer {
-            0 => (0..self.all_points.len()).collect::<Vec<usize>>(),
-            _ => self
-                .point_index
-                .iter()
-                .map(|item| *item)
-                .collect::<Vec<usize>>(),
-            //
-        };
-        v
-    }
-
     // This function parse points and allocate a subcell when a point requires it.
     // recall the tree grow upward. finer mesh is last layer, contrary to the paper
     fn split(&self) -> Option<Vec<Cell<'a, T>>> {
         // layer must be less than u32::BITS - 1
         assert!(self.layer < 32);
         //
-        if self.layer > 0 && self.point_index.len() == 0 {
+        if self.layer > 0 && self.point_index.is_empty() {
             panic!("cannot split with no point inside");
         }
         // we must construct an iterator on points in cell
         let rank_pt_in = self.get_point_rank_vec();
-        if self.layer == 0 && rank_pt_in.len() == 0 {
+        if self.layer == 0 && rank_pt_in.is_empty() {
             panic!("cannot split global cell, no point inside");
         }
         //
@@ -461,7 +466,7 @@ where
 
     // dump cells in layer. If level >= 1 dump points of each cell
     // debugging purposes
-    pub(crate) fn dump(&self, level: usize) {
+    pub(crate) fn dump(&self, _level: usize) {
         log::info!(
             "\n dumping of layer {}, nbcells : {}",
             self.layer,
@@ -546,7 +551,7 @@ where
 {
     pub fn new(space: &'a Space, points: &'a Vec<Point<T>>, user_layer_max: Option<u16>) -> Self {
         MeshBuilder {
-            space: space,
+            space,
             points,
             user_layer_max,
         }
@@ -637,7 +642,7 @@ where
                 cell.subtree_size = cell.get_nb_points();
             });
             //
-            let subtree_size: usize = layers[l as usize]
+            let subtree_size: usize = layers[l]
                 .get_hcells()
                 .iter()
                 .map(|mesh_cell| mesh_cell.get_subtree_size())
@@ -691,6 +696,7 @@ pub struct SpaceMesh<'a, T: Float> {
     // points with possible reduced dim
     points: &'a Vec<Point<T>>,
     /// By default the maximum layer is at u32::BITS -1 (i.e 31)
+    #[allow(unused)]
     user_layer_max: Option<u16>,
 }
 
@@ -698,13 +704,14 @@ impl<'a, T> SpaceMesh<'a, T>
 where
     T: Float + Debug + std::fmt::LowerExp + std::ops::AddAssign + std::ops::DivAssign + Sync,
 {
-    /// define Space.
-    /// - data points to cluster
-    /// - mindist to discriminate points. under this distance points will be associated
-    ///
-    pub fn new(space: &'a Space, points: &'a Vec<Point<T>>, user_layer_max: Option<u16>) -> Self {
-        //
-        let layers: Vec<Layer<T>> = Vec::with_capacity(1 + user_layer_max.unwrap_or(15) as usize);
+    // define Space. unused, use Builder instead
+    #[allow(unused)]
+    fn new(
+        space: &'a Space,
+        points: &'a Vec<Point<T>>,
+        layers: Vec<Layer<'a, T>>,
+        user_layer_max: Option<u16>,
+    ) -> Self {
         //
         SpaceMesh {
             space,
@@ -956,14 +963,14 @@ where
     /// This runs on possibly embedded points
     pub(crate) fn get_partition(
         &self,
-        p_size_arg: &Vec<usize>,
+        p_size_arg: &[usize],
         benefit_units: &[BenefitUnit],
     ) -> (DashMap<PointId, Vec<u32>>, DashMap<u32, PointId>) {
         //
         let cpu_start = ProcessTime::now();
         let sys_now = SystemTime::now();
         // we need to be sure partitions size are given in increasing order
-        let mut p_size = p_size_arg.clone();
+        let mut p_size = p_size_arg.to_owned();
         p_size.sort_unstable();
         let largest_partition_size = *p_size.last().unwrap();
         let nb_partition = p_size.len();
@@ -988,7 +995,11 @@ where
         for point in self.points.as_ref().unwrap() {
             clusters.insert(point.get_id(), vec![u32::MAX; nb_partition]);
         } */
-
+        // We build the all index set (needed for global cell)
+        let mut all_point_index = IndexSet::<usize>::with_capacity(self.points.len());
+        for i in 0..self.points.len() {
+            all_point_index.insert(i);
+        }
         // now we have initialized clusters
         //
         // to each cluster rank, the pid of point found as its center
@@ -998,16 +1009,14 @@ where
         log::info!("loop_min_size : {}", loop_min_size);
         let mut target_rank = 0; // at the beginning we try to make first partition
         for i in 0..loop_min_size {
-            if i >= p_size[target_rank] {
-                if target_rank < p_size.len() - 1 {
-                    target_rank += 1;
-                    log::info!("setting target partition size to {}", p_size[target_rank]);
-                    // we must transfer result from previous partition to
-                    clusters.iter_mut().for_each(|item| {
-                        let mut v = item.write();
-                        (*v)[target_rank] = (*v)[target_rank - 1];
-                    });
-                }
+            if i >= p_size[target_rank] && target_rank < p_size.len() - 1 {
+                target_rank += 1;
+                log::info!("setting target partition size to {}", p_size[target_rank]);
+                // we must transfer result from previous partition to
+                clusters.iter_mut().for_each(|item| {
+                    let mut v = item.write();
+                    (*v)[target_rank] = (*v)[target_rank - 1];
+                });
             }
             log::info!("in SpaceMesh::get_partition benefit unit : {}", i);
             let unit = &benefit_units[i];
@@ -1050,16 +1059,24 @@ where
                 );
             }
 
-            //     let point_rank_idx = unit_cell
+            //
             log::info!("nb point to dispatch {}", ref_cell.get_nb_points());
-            //            let pt_index = unit_cell.get_point_index();
+            let pt_index_opt = unit_cell.get_points_set_ref();
+            if pt_index_opt.is_none() && i != 0 {
+                log::info!("no point index and i != 0");
+                panic!();
+            }
+            let point_index_ref = match pt_index_opt {
+                Some(pt_index) => pt_index,
+                _ => &all_point_index,
+            };
             // TODO: to be changed ???
-            let point_ranks = unit_cell.get_point_rank_vec();
-            assert_eq!(point_ranks.len(), ref_cell.get_nb_points());
+            //            let point_ranks = unit_cell.get_point_rank_vec();
+            assert_eq!(point_index_ref.len(), ref_cell.get_nb_points());
             // what is exclusively in unit i and not in sub-sequent units
             let nbpoint_i = AtomicUsize::new(0);
             // let mut nbpoint_i = 0;
-            point_ranks.par_iter().for_each(|rank_point| {
+            point_index_ref.par_iter().for_each(|rank_point| {
                 let mut j = i + 1;
 
                 let found: bool = loop {
@@ -1132,16 +1149,14 @@ where
             let p_id: usize = self.points[point_rank].get_id();
             let clust_vec = v.read().to_vec();
             for (partiton_rank, c) in clust_vec.iter().enumerate() {
-                if log::log_enabled!(log::Level::Info) {
-                    if (*c as usize) >= p_size[partiton_rank] {
-                        log::error!(
-                            "point_rank : {} p_id : {}, cluster : {}, partitions_size[i] : {}",
-                            point_rank,
-                            p_id,
-                            *c,
-                            p_size[partiton_rank]
-                        );
-                    }
+                if log::log_enabled!(log::Level::Info) && (*c as usize) >= p_size[partiton_rank] {
+                    log::error!(
+                        "point_rank : {} p_id : {}, cluster : {}, partitions_size[i] : {}",
+                        point_rank,
+                        p_id,
+                        *c,
+                        p_size[partiton_rank]
+                    );
                 }
                 assert!(*c < u32::MAX);
             }
@@ -1188,6 +1203,7 @@ where
         norm_f64
     }
 
+    #[allow(unused)]
     // sum of sub tree size as seen from layer l. Used for debugging purpose
     fn get_subtree_size(&self, l: u16) -> usize {
         let size: usize = self.layers[l as usize]
