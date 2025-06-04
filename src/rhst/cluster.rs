@@ -615,10 +615,7 @@ where
         log::info!("dim : {}, xmin : {:.3e}, xmax : {:.3e}", dim, xmin, xmax);
         // construct spacemesh
         let space = Space::new(dim, xmin, xmax);
-
-        //        let mut spacemesh = SpaceMesh::new(&mut space, points_to_cluster, user_layer_max);
         let spacemesh = MeshBuilder::new(&space, points_to_cluster, user_layer_max).build();
-        //       spacemesh.embed();
 
         if self.debug_level > 1 {
             spacemesh.dump_layer(0, self.debug_level);
@@ -696,7 +693,6 @@ where
     // pt_affectation constains the cluster rank,
     // cluster_center contains the point_id designated as the center , resulting from benefit analysis
     // returns mean L2 cost
-    #[allow(unused)]
     pub(crate) fn compute_reaffectation_cost_medoid_l2(
         &self,
         pt_affectation: &DashMap<usize, u32>,

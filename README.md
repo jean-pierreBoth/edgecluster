@@ -15,7 +15,7 @@ For now we implement:
 The algorithm first dispatch points in **2-hierarchically separated tree** and then builds a clustering
 by analyzing the cost/benefit of merging cells at various level of the tree.
 This has 2 consequences:
-    - The embedding can be used to build partitions of data of different sizes and have various partitons size at marginal cost.
+    - **The embedding can be used to build partitions of data of different sizes  at marginal cost** (See results for Higgs data).
     - In case of very high dimensional data the division of cells edges by 2 in each dimension can be costly.  
       In this case we can reduce data dimension with the module *smalld* based on [skorski](https://proceedings.mlr.press/v134/skorski21a/skorski21a.pdf) and [mezzadri](https://arxiv.org/pdf/math-ph/0609050).
 
