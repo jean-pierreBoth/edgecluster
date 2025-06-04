@@ -1,7 +1,8 @@
 # h-clustering
 
-This crate is dedicated to recent k-median (hierarchical) clustering. It is related to the crate [coreset](https://crates.io/crates/hnsw_rs)
-as it provides efficient approximate clustering but in a different context.
+This crate is dedicated to recent k-median (hierarchical) clustering. It is related to the crate [coreset](https://crates.io/crates/coreset)
+as it provides efficient approximate clustering but in a different context. It also uses sub-crates of *coreset* such as the implementation
+of Normalized Information to assess cluster merit.
 
 For now we implement:
 
@@ -27,8 +28,12 @@ with :
   - k : number of cluster asked in a partiton
   - ∆ : max length of box edge enclosing data.
   
+The algorithm as the one implemented in crate [coreset](https://crates.io/crates/coreset) provides a very decent approximation of the optimal cost, but at a speed at least one order of magnitude faster than standard kmean or kmedoid
+as can be seen in [Higgs](https://archive.ics.uci.edu/dataset/280/higgs) data.
+
 ## Results
 
+Results are presented for Mnist data and Higgs data in 
 ## License
 
 Licensed under either of
