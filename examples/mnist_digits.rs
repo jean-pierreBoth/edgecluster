@@ -56,7 +56,6 @@ pub fn main() {
     let points: Vec<Point<f32>> = (0..labels.len())
         .map(|i| Point::<f32>::new(i, images_as_v[i].clone(), labels[i] as u32))
         .collect();
-    let ref_points: Vec<&Point<f32>> = points.iter().map(|p| p).collect();
     //
     let mut labels_distribution = HashMap::<u32, u32>::with_capacity(10);
     for p in &points {
@@ -80,7 +79,7 @@ pub fn main() {
     let user_layer_max = None;
     //===================================
     // cluster without specifying a dimension reducer
-    let mut hcluster = Hcluster::new(ref_points, None);
+    let mut hcluster = Hcluster::new(&points, None);
     let cluster_res = hcluster.cluster(&nb_cluster_asked, auto_dim, _small_dim, user_layer_max);
     for (i, p) in cluster_res.iter().enumerate() {
         log::info!(" \n\n results with {} clusters", nb_cluster_asked[i]);

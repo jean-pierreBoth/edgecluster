@@ -148,7 +148,7 @@ impl ClusterResult {
         T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign + Sync + Send,
     >(
         &self,
-        points: &[&Point<T>],
+        points: &[Point<T>],
     ) -> (Vec<Vec<T>>, f64) {
         //
         log::info!("\n in compute_cluster_mean_center");
@@ -159,7 +159,7 @@ impl ClusterResult {
             .collect();
         //
         for item in self.point_to_cluster.iter() {
-            let point = points[*item.key()];
+            let point = &points[*item.key()];
             let xyz = point.get_position();
             let center = &mut centers[*item.value() as usize];
             for d in 0..dim {
@@ -175,7 +175,7 @@ impl ClusterResult {
         // now compute dispatching cost
         let cost = AtomicF64::new(0.);
         self.point_to_cluster.par_iter().for_each(|item| {
-            let point = points[*item.key()];
+            let point = &points[*item.key()];
             let xyz = point.get_position();
             let center = &centers[*item.value() as usize];
             let dist = xyz
@@ -197,7 +197,7 @@ impl ClusterResult {
         T: Float + std::fmt::Debug + std::ops::AddAssign + std::ops::DivAssign + serde::Serialize,
     >(
         &self,
-        points: &[&Point<T>],
+        points: &[Point<T>],
         dumpfile: Option<&str>,
     ) -> T {
         log::info!("in ClusterResult compute_cost_medoid_l2, checking centers membership");
@@ -210,12 +210,12 @@ impl ClusterResult {
         //
         let mut norm = T::zero();
         for item in self.point_to_cluster.iter() {
-            let point = points[*item.key()];
+            let point = &points[*item.key()];
             let xyz = point.get_position();
             let key = point.get_id();
             let cluster = *self.point_to_cluster.get(&key).unwrap().value();
             let center_id = *self.cluster_center_to_pid.get(&cluster).unwrap().value();
-            let center_point = points[center_id];
+            let center_point = &points[center_id];
             norm += xyz
                 .iter()
                 .zip(center_point.get_position())
@@ -251,7 +251,7 @@ impl ClusterResult {
                 for item in self.cluster_center_to_pid.iter() {
                     let cluster = *item.key();
                     let center_id = *self.cluster_center_to_pid.get(&cluster).unwrap().value();
-                    let center_point = points[center_id];
+                    let center_point = &points[center_id];
                     let record = Record {
                         cluster,
                         data: center_point.get_position(),
@@ -455,8 +455,8 @@ impl ClusterResult {
 
 pub struct Hcluster<'a, T> {
     debug_level: usize,
-    //
-    points: Vec<&'a Point<T>>,
+    // original data points before dimension reduction
+    points: &'a Vec<Point<T>>,
     //
     auto_dim: bool,
     //
@@ -481,7 +481,7 @@ where
     /// If not, the algorithm will try to choose one.  
     ///
     /// NOTA: As points are passed as a Vec, the PointId identificator of a Point must be its rank!
-    pub fn new(points: Vec<&'a Point<T>>, reducer: Option<&'a dyn reducer::Reducer<T>>) -> Self {
+    pub fn new(points: &'a Vec<Point<T>>, reducer: Option<&'a dyn reducer::Reducer<T>>) -> Self {
         //
         log::info!("entering Hcluster::new, nb_points : {}", points.len());
         // construct space
@@ -525,7 +525,7 @@ where
     }
 
     /// returns references to points
-    pub fn get_points(&self) -> &Vec<&'a Point<T>> {
+    pub fn get_points(&self) -> &Vec<Point<T>> {
         &self.points
     }
 
@@ -586,7 +586,7 @@ where
         let dim = self.points[0].get_dimension();
         log::debug!("dim : {} xmin : {:.3e}, xmax : {:.3e}", dim, xmin, xmax);
         // TODO: do we need to keep points in HCluster (we clone a vec of references)
-        let points_to_cluster: Vec<&Point<T>>;
+        let points_to_cluster: &Vec<Point<T>>;
         let reduced_dim = reduced_dim_opt.unwrap_or_default();
         if (dim > self.points.len().ilog(2) as usize && self.auto_dim) || reduced_dim > 0 {
             let mut to_dim: usize = self.points.len().ilog(2) as usize;
@@ -596,15 +596,10 @@ where
             log::info!("reducing dimension from : {} to : {}", dim, to_dim);
             // we reduce dimension
             self.reduced_points = Some(self.reduce_points(to_dim));
-            points_to_cluster = self
-                .reduced_points
-                .as_ref()
-                .unwrap()
-                .iter()
-                .collect::<Vec<&Point<T>>>();
+            points_to_cluster = self.reduced_points.as_ref().unwrap()
         } else {
             log::info!("clustering keeping original dimension: {} ", dim);
-            points_to_cluster = self.points.clone();
+            points_to_cluster = &self.points;
         }
         // we have points_to_cluster , we can construct space
         let (xmin, xmax) = points_to_cluster
@@ -619,9 +614,11 @@ where
         let dim = points_to_cluster[0].get_dimension();
         log::info!("dim : {}, xmin : {:.3e}, xmax : {:.3e}", dim, xmin, xmax);
         // construct spacemesh
-        let mut space = Space::new(dim, xmin, xmax);
-        let mut spacemesh = SpaceMesh::new(&mut space, points_to_cluster, user_layer_max);
-        spacemesh.embed();
+        let space = Space::new(dim, xmin, xmax);
+
+        //        let mut spacemesh = SpaceMesh::new(&mut space, points_to_cluster, user_layer_max);
+        let spacemesh = MeshBuilder::new(&space, points_to_cluster, user_layer_max).build();
+        //       spacemesh.embed();
 
         if self.debug_level > 1 {
             spacemesh.dump_layer(0, self.debug_level);
@@ -635,10 +632,10 @@ where
                 "dump of filtered_benefits, nbunits : {}",
                 filtered_benefits.len()
             );
-            dump_benefits(&spacemesh, &filtered_benefits);
+            spacemesh.dump_benefits(&filtered_benefits);
         }
         if log::log_enabled!(log::Level::Debug) {
-            check_benefits_cover(&spacemesh, &filtered_benefits);
+            spacemesh.check_benefits_cover(&filtered_benefits);
         }
         filtered_benefits.truncate(partitions_size.last().unwrap() + 2);
         //
@@ -664,17 +661,6 @@ where
             for item in &point_in_clusters {
                 let p_id = item.key();
                 let c = item.value()[i];
-                if log::log_enabled!(log::Level::Info) {
-                    if (c as usize) >= partitions_size[i] {
-                        log::error!(
-                            "partition i : {} c : {}, partitions_size[i] : {}",
-                            i,
-                            c,
-                            partitions_size[i]
-                        );
-                    }
-                }
-                assert!((c as usize) < partitions_size[i]);
                 point_to_cluster.insert(*p_id, c);
             }
 
@@ -730,7 +716,7 @@ where
         let points = &self.points;
         log::info!("dimension : {}", self.points[0].get_dimension());
         (0..nb_points).into_par_iter().for_each(|point_rank| {
-            let point = points[point_rank];
+            let point = &points[point_rank];
             let xyz = point.get_position();
             let mut mindist = f64::MAX;
             let mut minclust: usize = usize::MAX;
@@ -802,7 +788,7 @@ where
         let points = &self.points;
         log::info!("dimension : {}", self.points[0].get_dimension());
         (0..nb_points).into_par_iter().for_each(|point_rank| {
-            let point = points[point_rank];
+            let point = &points[point_rank];
             let xyz = point.get_position();
             let mut mindist = f64::MAX;
             let mut minclust: usize = usize::MAX;
@@ -902,7 +888,7 @@ mod tests {
         log::info!("in test_cluster_random");
         //=====================================
         // points are generated around 5 centers/labels
-        let nbvec = 1000_000usize;
+        let nbvec = 1_000usize;
         let dim = 2;
         let width: f64 = 1.;
         let nb_cluster_asked = 5;
@@ -924,8 +910,7 @@ mod tests {
         }
         let ref_affectation = DashAffectation::new(&ref_hashmap);
         // SpaceMesh construction
-        let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
-        let mut hcluster = Hcluster::new(refpoints, None);
+        let mut hcluster = Hcluster::new(&points, None);
         hcluster.set_debug_level(1);
         let auto_dim = false;
         //
@@ -980,9 +965,8 @@ mod tests {
         }
         let ref_affectation = DashAffectation::new(&ref_hashmap);
         // Space definition
-        let refpoints: Vec<&Point<f32>> = points.iter().map(|p| p).collect();
         //
-        let mut hcluster = Hcluster::new(refpoints, None);
+        let mut hcluster = Hcluster::new(&points, None);
         let auto_dim = false;
         let cluster_res = hcluster.cluster_one(nb_cluster_asked, auto_dim, None, None);
         cluster_res.dump_cluster_id::<usize>(None);

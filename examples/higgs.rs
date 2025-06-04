@@ -273,7 +273,6 @@ pub fn main() {
     let points: Vec<Point<f32>> = (0..labels.len())
         .map(|i| Point::<f32>::new(i, data[i].clone(), labels[i] as u32))
         .collect();
-    let ref_points: Vec<&Point<f32>> = points.iter().map(|p| p).collect();
     //
     let mut labels_distribution = HashMap::<u32, u32>::with_capacity(10);
     for p in &points {
@@ -299,7 +298,7 @@ pub fn main() {
     let user_layer_max = Some(9);
     //===================================
     // cluster without specifying a dimension reducer
-    let mut hcluster = Hcluster::new(ref_points, None);
+    let mut hcluster = Hcluster::new(&points, None);
     let cluster_res = hcluster.cluster(&nb_cluster_asked, auto_dim, None, user_layer_max);
     //
     // dump results
@@ -330,7 +329,7 @@ pub fn main() {
         );
         p.dump_cluster_id(Some(&labels));
         //
-        let (_, kmean_cost) = p.compute_cluster_kmean_centers::<f32>(&refpoints);
+        let (_, kmean_cost) = p.compute_cluster_kmean_centers::<f32>(refpoints);
         log::info!("kmeans cost : {:.3e}", kmean_cost);
         // merit comparison
         println!("merit ctatus");

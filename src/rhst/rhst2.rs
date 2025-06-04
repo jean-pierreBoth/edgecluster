@@ -163,8 +163,8 @@ pub(crate) struct Cell<'a, T> {
     // number of points in subtree of cells
     subtree_size: usize,
     //
-    points_in: Option<Vec<&'a Point<T>>>,
-    //
+    all_points: &'a Vec<Point<T>>,
+    // contains rank of points located in cell
     point_index: IndexSet<usize>,
 }
 
@@ -172,14 +172,19 @@ impl<'a, T> Cell<'a, T>
 where
     T: Float + Debug + std::fmt::LowerExp,
 {
-    pub fn new(space: &'a Space, layer: u16, index: Vec<u32>) -> Self {
+    pub fn new(
+        space: &'a Space,
+        layer: u16,
+        index: Vec<u32>,
+        all_points: &'a Vec<Point<T>>,
+    ) -> Self {
         assert!(layer < u32::BITS as u16);
         Cell {
             space,
             layer,
             index,
             subtree_size: 0,
-            points_in: None,
+            all_points,
             point_index: IndexSet::<usize>::new(),
         }
     }
@@ -189,39 +194,45 @@ where
         self.layer as usize
     }
 
-    /// Return cel weight. This is also the cardinal of the subtree corresponding to a point in cell
-    /// as long as points have no weights
-    #[allow(unused)]
-    pub(crate) fn get_cell_weight(&self) -> f32 {
-        if let Some(points) = self.points_in.as_ref() {
-            points.len() as f32
-        } else {
-            0.
-        }
-    } // end of get_cell_weight
-
-    /// Return number of points.
+    /// Return number of points in cell.
     pub(crate) fn get_nb_points(&self) -> usize {
-        if let Some(points) = self.points_in.as_ref() {
-            points.len()
+        let nb_points = if self.get_layer() > 0 {
+            self.point_index.len()
         } else {
-            0
-        }
+            self.all_points.len()
+        };
+        assert!(nb_points > 0);
+        //
+        nb_points
     } // end of get_nb_point
 
-    pub(crate) fn get_points(&self) -> Option<&Vec<&Point<T>>> {
-        self.points_in.as_ref()
+    // returns an option on rank set
+    #[allow(unused)]
+    pub(crate) fn get_points_set(&self) -> Option<&IndexSet<usize>> {
+        if self.layer > 0 {
+            Some(&self.point_index)
+        } else {
+            None
+        }
     }
 
     fn get_cell_index(&self) -> &[u32] {
         &self.index
     }
 
+    fn get_first_point_rank(&self) -> usize {
+        *self.point_index.first().unwrap()
+    }
+
+    pub fn get_point_index(&self) -> &IndexSet<usize> {
+        &self.point_index
+    }
+
     #[allow(unused)]
     // returns true if a point is in sub tree of cell
     pub(crate) fn has_point(&self, pid: PointId) -> bool {
-        if self.points_in.is_none() {
-            false
+        if self.layer == 0 {
+            true
         } else {
             self.point_index.contains(&pid)
             /*             for p in self.points_in.as_ref().unwrap() {
@@ -255,25 +266,16 @@ where
     }
 
     // adds a point in cell
-    fn add_point(&mut self, point: &'a Point<T>) {
-        match self.points_in.as_mut() {
+    fn add_point_rank(&mut self, point_rank: usize) {
+        /*         match self.points_in.as_mut() {
             Some(points) => points.push(point),
             None => {
                 let vec = vec![point];
                 self.points_in = Some(vec);
             }
-        }
-        self.point_index.insert(point.get_id());
+        } */
+        self.point_index.insert(point_rank);
     }
-
-    // fill in points
-    fn init_points(&mut self, points: &[&'a Point<T>]) {
-        assert!(self.points_in.is_none());
-        self.points_in = Some(<Vec<&'a Point<T>>>::from(points));
-        for p in points {
-            self.point_index.insert(p.get_id());
-        }
-    } // end of init_points
 
     // given layer and index in mesh, returns cooridnates of center of mesh in space
     // at coarser (pareint in splitting) layer cell width is space width divided by 2 and so on
@@ -288,20 +290,38 @@ where
         position
     } // end of get_cell_center
 
+    fn get_point_rank_vec(&self) -> Vec<usize> {
+        let v: Vec<usize> = match self.layer {
+            0 => (0..self.all_points.len()).collect::<Vec<usize>>(),
+            _ => self
+                .point_index
+                .iter()
+                .map(|item| *item)
+                .collect::<Vec<usize>>(),
+            //
+        };
+        v
+    }
+
     // This function parse points and allocate a subcell when a point requires it.
     // recall the tree grow upward. finer mesh is last layer, contrary to the paper
     fn split(&self) -> Option<Vec<Cell<'a, T>>> {
         // layer must be less than u32::BITS - 1
         assert!(self.layer < 32);
         //
-        if self.points_in.is_none() {
-            log::debug!("no points in cell");
-            self.points_in.as_ref()?; /* return in case of None */
+        if self.layer > 0 && self.point_index.len() == 0 {
+            panic!("cannot split with no point inside");
+        }
+        // we must construct an iterator on points in cell
+        let rank_pt_in = self.get_point_rank_vec();
+        if self.layer == 0 && rank_pt_in.len() == 0 {
+            panic!("cannot split global cell, no point inside");
         }
         //
         let mut hashed_cells: HashMap<Vec<u32>, Cell<T>> = HashMap::new();
         //
-        for point in self.points_in.as_ref().unwrap() {
+        for rp in &rank_pt_in {
+            let point = &self.all_points[*rp];
             let xyz = point.get_position();
             let mut split_index = Vec::<u32>::with_capacity(self.space.get_dim());
             let cell_center = self.get_cell_center();
@@ -316,11 +336,15 @@ where
             }
             // must  we must allocate a new cell at lower(!) layer
             if let Some(cell) = hashed_cells.get_mut(&split_index) {
-                cell.add_point(point);
+                cell.add_point_rank(*rp);
             } else {
-                let mut new_cell: Cell<T> =
-                    Cell::new(self.space, self.layer + 1, split_index.clone());
-                new_cell.add_point(point);
+                let mut new_cell: Cell<T> = Cell::new(
+                    self.space,
+                    self.layer + 1,
+                    split_index.clone(),
+                    self.all_points,
+                );
+                new_cell.add_point_rank(*rp);
                 hashed_cells.insert(split_index.clone(), new_cell);
             }
         }
@@ -334,7 +358,7 @@ where
             log::trace!(
                 "layer : {}, cell with nb points {:?} splitted in {:?} new cells",
                 self.layer,
-                self.points_in.as_ref().unwrap().len(),
+                self.point_index.len(),
                 new_cells.len()
             );
         }
@@ -447,12 +471,6 @@ where
             log::info!("idx : {:?}", item.key());
             let cell = item.value();
             log::info!("cell rank : {}, nb points : {}", rank, cell.get_nb_points());
-            if level >= 1 {
-                let points = cell.get_points().unwrap();
-                for p in points.iter() {
-                    log::trace!("p : {:?}", p.get_position());
-                }
-            }
         }
     }
 } // end implementation Layer
@@ -514,6 +532,146 @@ impl BenefitUnit {
 
 //TODO: space must provide for random shift!!!
 
+//===============================================================
+
+pub struct MeshBuilder<'a, T> {
+    space: &'a Space,
+    points: &'a Vec<Point<T>>,
+    user_layer_max: Option<u16>,
+}
+
+impl<'a, T> MeshBuilder<'a, T>
+where
+    T: Float + Debug + std::fmt::LowerExp + std::ops::AddAssign + std::ops::DivAssign + Sync,
+{
+    pub fn new(space: &'a Space, points: &'a Vec<Point<T>>, user_layer_max: Option<u16>) -> Self {
+        MeshBuilder {
+            space: space,
+            points,
+            user_layer_max,
+        }
+    }
+
+    pub fn build(self) -> SpaceMesh<'a, T> {
+        log::info!("SpaceMesh builder");
+        let cpu_start = ProcessTime::now();
+        let sys_now = SystemTime::now();
+        //
+        // initialize layers (layer lmax to bottom layer 0
+        let mut layers = Vec::with_capacity(15);
+        log::info!("SpaceMesh::embed allocated by default nb layers {}", 15);
+        // initialize root cell
+        let center = vec![0u32; self.space.get_dim()];
+        // root cell, it is declared above maximum layer as it is isolated...
+        let global_cell = Cell::<'a, T>::new(self.space, 0u16, center.clone(), self.points);
+        //===========    global_cell.init_points(&self.points.as_ref().unwrap().clone());
+        let mut l = 0u16;
+        let coarser_layer = Layer::<'a, T>::new(l, self.get_layer_cell_diameter(l));
+        layers.push(coarser_layer);
+
+        layers[0_usize].insert_cells(vec![global_cell]);
+        // now we can propagate layer downward, cells can be treated // using par_iter_mut
+        let maximum_layer = self.user_layer_max.unwrap_or(u32::BITS as u16 - 1);
+        loop {
+            log::info!("splitting layer : l : {}", l);
+            let new_layer = l + 1;
+            let finer_layer = Layer::<T>::new(
+                new_layer,
+                self.get_layer_cell_diameter(new_layer),
+                //                self.points.as_ref().unwrap(),
+            );
+            layers.push(finer_layer);
+            let finer_layer = &layers[new_layer as usize];
+            // changing into_iter to into_par_iter is sufficient to get //.
+            layers[l as usize]
+                .get_hcells()
+                .into_par_iter()
+                .for_each(|cell| {
+                    assert_eq!(l as usize, cell.get_layer());
+                    if let Some(new_cells) = cell.split() {
+                        finer_layer.insert_cells(new_cells);
+                    }
+                });
+            log::info!(
+                "Spacemesh::embed ,layer {} has {} nbcells",
+                new_layer,
+                layers[new_layer as usize].get_nb_cells()
+            );
+            if layers[new_layer as usize].get_nb_cells() >= self.points.len() {
+                break;
+            } else {
+                if new_layer == maximum_layer {
+                    log::info!("stopping at max layer : {}", new_layer);
+                    break;
+                }
+                l += 1;
+            }
+        }
+        // debug info : dump coordianates of layer 0 origin cell
+        log::info!("MeshBuilder got nb layers : {}", layers.len());
+        for l in 0..layers.len() {
+            let layer = &layers[l];
+            let cell0 = layer.get_hcells().iter().nth(0).unwrap();
+            let cell0_idx = cell0.get_cell_index();
+            let cell0_center = cell0.get_cell_center();
+            assert!(!cell0_center.is_empty());
+            log::debug!(
+                "\n layer : {}, cell diameter {:.3e}",
+                l,
+                layer.get_diameter()
+            );
+            log::debug!("index of first (in iterator) cell : {:?}", cell0_idx);
+            if cell0_center.len() <= 20 && log::log_enabled!(log::Level::Debug) {
+                log::debug!("coordinates of first cell center : ");
+                for c in cell0_center {
+                    print!(" {:.3e}", c);
+                }
+                println!();
+            }
+        }
+        //
+        log::info!("in compute_subtree_size ");
+        for l in (0..layers.len()).rev() {
+            let layer = &layers[l];
+            layer.get_hcells().par_iter_mut().for_each(|mut cell| {
+                cell.subtree_size = cell.get_nb_points();
+            });
+            //
+            let subtree_size: usize = layers[l as usize]
+                .get_hcells()
+                .iter()
+                .map(|mesh_cell| mesh_cell.get_subtree_size())
+                .sum();
+            assert_eq!(subtree_size, self.points.len());
+        }
+        //
+        let cpu_time: Duration = cpu_start.elapsed();
+        println!(
+            " SpaceMesh::embed sys time(ms) {:?} cpu time {:?}",
+            sys_now.elapsed().unwrap().as_millis(),
+            cpu_time.as_millis()
+        );
+        log::debug!("info SpaceMesh builder");
+        //
+        SpaceMesh {
+            space: self.space,
+            layers,
+            points: self.points,
+            user_layer_max: self.user_layer_max,
+        }
+    }
+
+    pub fn get_layer_cell_diameter(&self, layer: u16) -> f64 {
+        //
+        let cell_diameter: f64 = (self.space.get_mesh_width()
+            * (self.space.get_dim() as f64).sqrt())
+            / 2_u32.pow((layer) as u32) as f64;
+        cell_diameter
+    }
+}
+
+//===============================================================
+
 #[cfg_attr(doc, katexit::katexit)]
 /// structure describing space in which data point are supposed to live.
 /// Data are supposed to live in an enclosing box $$[xmin, xmax]^dim$$.  
@@ -530,8 +688,8 @@ pub struct SpaceMesh<'a, T: Float> {
     space: &'a Space,
     // layers are stored in vector according to their layer num
     layers: Vec<Layer<'a, T>>,
-    //
-    points: Option<Vec<&'a Point<T>>>,
+    // points with possible reduced dim
+    points: &'a Vec<Point<T>>,
     /// By default the maximum layer is at u32::BITS -1 (i.e 31)
     user_layer_max: Option<u16>,
 }
@@ -544,18 +702,14 @@ where
     /// - data points to cluster
     /// - mindist to discriminate points. under this distance points will be associated
     ///
-    pub fn new(
-        space: &'a mut Space,
-        points: Vec<&'a Point<T>>,
-        user_layer_max: Option<u16>,
-    ) -> Self {
+    pub fn new(space: &'a Space, points: &'a Vec<Point<T>>, user_layer_max: Option<u16>) -> Self {
         //
         let layers: Vec<Layer<T>> = Vec::with_capacity(1 + user_layer_max.unwrap_or(15) as usize);
         //
         SpaceMesh {
             space,
             layers,
-            points: Some(points),
+            points,
             user_layer_max,
         }
     }
@@ -579,10 +733,7 @@ where
     }
 
     pub fn get_nb_points(&self) -> usize {
-        match &self.points {
-            Some(vec) => vec.len(),
-            _ => 0,
-        }
+        self.points.len()
     }
 
     pub(crate) fn get_layer(&self, l: u16) -> &Layer<'a, T> {
@@ -675,94 +826,6 @@ where
         cell_diameter
     }
 
-    /// this function embeds data in a 2-rhst
-    /// It propagate cells partitioning space from coarser to finer mesh
-    pub fn embed(&mut self) {
-        log::info!("SpaceMesh::embed");
-        let cpu_start = ProcessTime::now();
-        let sys_now = SystemTime::now();
-        // initialize layers (layer lmax to bottom layer 0
-        self.layers = Vec::with_capacity(15);
-        log::info!("SpaceMesh::embed allocated by default nb layers {}", 15);
-        // initialize root cell
-        let center = vec![0u32; self.get_dim()];
-        // root cell, it is declared above maximum layer as it is isolated...
-        let mut global_cell = Cell::<T>::new(self.space, 0u16, center.clone());
-        global_cell.init_points(&self.points.as_ref().unwrap().clone());
-        let mut l = 0u16;
-        let coarser_layer = Layer::<T>::new(l, self.get_layer_cell_diameter(l));
-        self.layers.push(coarser_layer);
-
-        let coarser_layer: &Layer<'a, T> = &self.layers[0_usize];
-        coarser_layer.insert_cells(vec![global_cell]);
-        // now we can propagate layer downward, cells can be treated // using par_iter_mut
-        let maximum_layer = self.user_layer_max.unwrap_or(u32::BITS as u16 - 1);
-        loop {
-            log::info!("splitting layer : l : {}", l);
-            let new_layer = l + 1;
-            let finer_layer = Layer::<T>::new(new_layer, self.get_layer_cell_diameter(new_layer));
-            self.layers.push(finer_layer);
-            let finer_layer = &self.layers[new_layer as usize];
-            // changing into_iter to into_par_iter is sufficient to get //.
-            self.layers[l as usize]
-                .get_hcells()
-                .into_par_iter()
-                .for_each(|cell| {
-                    assert_eq!(l as usize, cell.get_layer());
-                    if let Some(new_cells) = cell.split() {
-                        finer_layer.insert_cells(new_cells);
-                    }
-                });
-            log::info!(
-                "Spacemesh::embed ,layer {} has {} nbcells",
-                new_layer,
-                self.layers[new_layer as usize].get_nb_cells()
-            );
-            if self.layers[new_layer as usize].get_nb_cells() >= self.get_nb_points() {
-                break;
-            } else {
-                if new_layer == maximum_layer {
-                    log::info!("stopping at max layer : {}", new_layer);
-                    break;
-                }
-                l += 1;
-            }
-        }
-        // debug info : dump coordianates of layer 0 origin cell
-        log::info!("got nb layers : {}", self.get_nb_layers());
-        for l in 0..self.get_nb_layers() {
-            let layer = self.get_layer(l as u16);
-            let cell0 = layer.get_hcells().iter().nth(0).unwrap();
-            let cell0_idx = cell0.get_cell_index();
-            let cell0_center = cell0.get_cell_center();
-            assert!(!cell0_center.is_empty());
-            log::debug!(
-                "\n layer : {}, cell diameter {:.3e}",
-                l,
-                layer.get_diameter()
-            );
-            log::debug!("index of first (in iterator) cell : {:?}", cell0_idx);
-            if cell0_center.len() <= 20 && log::log_enabled!(log::Level::Debug) {
-                log::debug!("coordinates of first cell center : ");
-                for c in cell0_center {
-                    print!(" {:.3e}", c);
-                }
-                println!();
-            }
-        }
-        //
-        self.compute_subtree_size();
-        log::info!("exiting SpaceMesh::embed");
-        let cpu_time: Duration = cpu_start.elapsed();
-        println!(
-            " SpaceMesh::embed sys time(ms) {:?} cpu time {:?}",
-            sys_now.elapsed().unwrap().as_millis(),
-            cpu_time.as_millis()
-        );
-        log::debug!("exiting SpaceMesh::embed")
-        //
-    } // end of embed
-
     #[allow(unused)]
     pub(crate) fn dump_layer(&self, layer: usize, level: usize) {
         self.layers[layer].dump(level);
@@ -770,7 +833,7 @@ where
 
     //
     /// gives a summary: number of cells by layer etc
-    pub fn summary(&mut self) {
+    pub fn summary(&self) {
         //
         if self.layers.is_empty() {
             println!("layers not allocated");
@@ -953,7 +1016,7 @@ where
             // get a point at which this unit opened
             let cell_finest = self.get_cell(id_max, layer_max as u16).unwrap();
             assert_eq!(cell_finest.value().get_layer(), layer_max);
-            let center_point_id = cell_finest.value().get_points().unwrap()[0].get_id();
+            let center_point_id = cell_finest.value().get_first_point_rank();
             // store center
             let clust: u32 = i.try_into().unwrap();
             if centers.get(&clust).is_none() {
@@ -987,12 +1050,16 @@ where
                 );
             }
 
-            let points = unit_cell.get_points().unwrap();
-            log::info!("nb point to dispacth {}", points.len());
+            //     let point_rank_idx = unit_cell
+            log::info!("nb point to dispatch {}", ref_cell.get_nb_points());
+            //            let pt_index = unit_cell.get_point_index();
+            // TODO: to be changed ???
+            let point_ranks = unit_cell.get_point_rank_vec();
+            assert_eq!(point_ranks.len(), ref_cell.get_nb_points());
             // what is exclusively in unit i and not in sub-sequent units
             let nbpoint_i = AtomicUsize::new(0);
             // let mut nbpoint_i = 0;
-            points.par_iter().for_each(|point| {
+            point_ranks.par_iter().for_each(|rank_point| {
                 let mut j = i + 1;
 
                 let found: bool = loop {
@@ -1003,7 +1070,7 @@ where
                     let (_, layer_j) = unit_j.get_id();
                     let idx_j = unit_j.get_index_at_layer(layer_j);
                     let ref_cell_j = self.get_cell(&idx_j, layer_j).unwrap();
-                    if ref_cell_j.has_point(point.get_id()) {
+                    if ref_cell_j.has_point(*rank_point) {
                         break true;
                     } else if j < p_size[target_rank] - 1 {
                         j += 1;
@@ -1012,7 +1079,7 @@ where
                     }
                 };
                 if !found {
-                    clusters[point.get_id()].write()[target_rank] = i as u32;
+                    clusters[*rank_point].write()[target_rank] = i as u32;
                     // point is exclusively in cell i
                     //        clusters.get_mut(&point.get_id()).unwrap()[target_rank] = i as u32;
                     /*                     if let Some(old) = clusters.insert(point.get_id(), i as u32) {
@@ -1027,9 +1094,11 @@ where
                         );
                         panic!();
                     } */
+                    let point = &self.points[*rank_point];
                     log::trace!(
-                        "point {:?} x... = {:?}  inserted in cluster {}",
+                        "point id {:?} , point_rank : {}, x... = {:?}  inserted in cluster {}",
                         point.get_id(),
+                        *rank_point,
                         point.get_position(),
                         i
                     );
@@ -1058,8 +1127,25 @@ where
         );
         // transform to a DashMap
         let clusters_hash = DashMap::<PointId, Vec<u32>>::with_capacity(nb_points);
-        for (i, v) in clusters.iter().enumerate() {
-            clusters_hash.insert(i, v.read().to_vec());
+        //
+        for (point_rank, v) in clusters.iter().enumerate() {
+            let p_id: usize = self.points[point_rank].get_id();
+            let clust_vec = v.read().to_vec();
+            for (partiton_rank, c) in clust_vec.iter().enumerate() {
+                if log::log_enabled!(log::Level::Info) {
+                    if (*c as usize) >= p_size[partiton_rank] {
+                        log::error!(
+                            "point_rank : {} p_id : {}, cluster : {}, partitions_size[i] : {}",
+                            point_rank,
+                            p_id,
+                            *c,
+                            p_size[partiton_rank]
+                        );
+                    }
+                }
+                assert!(*c < u32::MAX);
+            }
+            clusters_hash.insert(p_id, v.read().to_vec());
         }
         //
         (clusters_hash, centers)
@@ -1078,7 +1164,7 @@ where
         log::info!("SpaceMesh compute_medoid_cost");
         //
         let mut norm = T::zero();
-        let points = self.points.as_ref().unwrap();
+        let points = self.points;
         log::info!("dimension : {}", points[0].get_dimension());
         for point in points.iter() {
             let xyz = point.get_position();
@@ -1102,21 +1188,6 @@ where
         norm_f64
     }
 
-    // we need to compute cardinal of each subtree (all descendants of each cell)
-    // just dispatch number of points
-    fn compute_subtree_size(&self) {
-        //
-        log::debug!("in compute_subtree_size ");
-        for l in (0..self.get_nb_layers()).rev() {
-            let layer = &self.layers[l];
-            layer.get_hcells().par_iter_mut().for_each(|mut cell| {
-                cell.subtree_size = cell.points_in.as_ref().unwrap().len();
-            });
-            self.get_subtree_size(l as u16);
-        }
-        log::debug!("exiting compute_subtree_size ");
-    } // end of compute_subtree_cardinals
-
     // sum of sub tree size as seen from layer l. Used for debugging purpose
     fn get_subtree_size(&self, l: u16) -> usize {
         let size: usize = self.layers[l as usize]
@@ -1129,59 +1200,57 @@ where
         //
         size
     }
-} // end of impl SpaceMesh
 
-//==================
-
-pub(crate) fn dump_benefits<T>(spacemesh: &SpaceMesh<T>, benefits: &[BenefitUnit])
-where
-    T: Float + Debug + std::fmt::LowerExp + std::ops::AddAssign + std::ops::DivAssign + Sync,
-{
-    let dump_size = 100;
-    log::info!("dumping first {} units", dump_size);
-    for (rank, unit) in benefits.iter().enumerate().take(dump_size) {
-        log::debug!("\n\n unit rank {}, {:?}", rank, unit);
-        let cell_idx0 = unit.get_cell_idx();
-        let cell = spacemesh.get_cell(cell_idx0, 0).unwrap();
-        let center = spacemesh.get_cell_center(cell_idx0, 0).unwrap();
-        log::debug!("nb point : {}", cell.get_nb_points());
-        if log::log_enabled!(log::Level::Debug) {
-            print!("\n center : ");
-            for x in center {
-                print!(" {:.3e}", x);
+    pub(crate) fn dump_benefits(&self, benefits: &[BenefitUnit])
+    where
+        T: Float + Debug + std::fmt::LowerExp + std::ops::AddAssign + std::ops::DivAssign + Sync,
+    {
+        let dump_size = 100;
+        log::info!("dumping first {} units", dump_size);
+        for (rank, unit) in benefits.iter().enumerate().take(dump_size) {
+            log::debug!("\n\n unit rank {}, {:?}", rank, unit);
+            let cell_idx0 = unit.get_cell_idx();
+            let cell = self.get_cell(cell_idx0, 0).unwrap();
+            let center = self.get_cell_center(cell_idx0, 0).unwrap();
+            log::debug!("nb point : {}", cell.get_nb_points());
+            if log::log_enabled!(log::Level::Debug) {
+                print!("\n center : ");
+                for x in center {
+                    print!(" {:.3e}", x);
+                }
+                println!();
             }
-            println!();
         }
-    }
-}
+    } // end dump_benefits
 
-// we check we have a partition
-pub(crate) fn check_benefits_cover<T>(spacemesh: &SpaceMesh<T>, benefits: &Vec<BenefitUnit>)
-where
-    T: Float + Debug + std::fmt::LowerExp + std::ops::AddAssign + std::ops::DivAssign + Sync,
-{
-    log::debug!("entering in check_benefits_cover");
-    let mut nb_points_in: usize = 0;
-    for unit in benefits {
-        let (finer_idx, l) = unit.get_id();
-        let shift = spacemesh.get_nb_layers() - 1 - l as usize;
-        let up_idx: Vec<u32> = finer_idx.iter().map(|x| x >> shift).collect();
-        if let Some(cell) = spacemesh.get_layer(l).get_cell(&up_idx) {
-            assert!(cell.get_nb_points() > 0);
-            nb_points_in += cell.get_nb_points();
-        } else {
-            log::error!(
+    // we check we have a partition
+    pub(crate) fn check_benefits_cover(&self, benefits: &Vec<BenefitUnit>)
+    where
+        T: Float + Debug + std::fmt::LowerExp + std::ops::AddAssign + std::ops::DivAssign + Sync,
+    {
+        log::debug!("entering in check_benefits_cover");
+        let mut nb_points_in: usize = 0;
+        for unit in benefits {
+            let (finer_idx, l) = unit.get_id();
+            let shift = self.get_nb_layers() - 1 - l as usize;
+            let up_idx: Vec<u32> = finer_idx.iter().map(|x| x >> shift).collect();
+            if let Some(cell) = self.get_layer(l).get_cell(&up_idx) {
+                assert!(cell.get_nb_points() > 0);
+                nb_points_in += cell.get_nb_points();
+            } else {
+                log::error!(
                 "spacemesh benefit unit {:?}  cannot find its cell, up_idx : {:?}, nb_points found {}",
                 unit,
                 up_idx,
                 nb_points_in,
             );
-            panic!();
+                panic!();
+            }
         }
-    }
-    log::info!("nb points referenced in benefits : {}", nb_points_in);
-    log::info!("nb points in space : {}", spacemesh.get_nb_points());
-}
+        log::info!("nb points referenced in benefits : {}", nb_points_in);
+        log::info!("nb points in space : {}", self.get_nb_points());
+    } // enf of check_benefits_cover
+} // end of impl SpaceMesh
 
 //===========================
 
@@ -1248,13 +1317,10 @@ mod tests {
             let p: Vec<f64> = (0..dim).map(|_| unif_width.sample(&mut rng)).collect();
             points.push(Point::<f64>::new(i, p, (i % 5).try_into().unwrap()));
         }
-        let refpoints: Vec<&Point<f64>> = points.iter().map(|p| p).collect();
         // Space definition
-        let mut space = Space::new(dim, 0., width);
-        let mut mesh = SpaceMesh::new(&mut space, refpoints, None);
-
+        let space: Space = Space::new(dim, 0., width);
         //
-        mesh.embed();
+        let mesh = MeshBuilder::new(&space, &points, None).build();
         mesh.summary();
         // check cell basics, center, index conversion
         let pt = points[0].get_position();
@@ -1269,8 +1335,6 @@ mod tests {
                 l
             );
         }
-        //
-        mesh.compute_subtree_size();
         //
         let _benefits = mesh.compute_benefits();
     } //end of test_uniform_random
@@ -1322,12 +1386,9 @@ mod tests {
                 .collect();
             points.push(Point::<f32>::new(i, p, (i % 5).try_into().unwrap()));
         }
-        let refpoints: Vec<&Point<f32>> = points.iter().map(|p| p).collect();
         // Space definition
-        let mut space = Space::new(dim, 0., width);
-
-        let mut mesh = SpaceMesh::new(&mut space, refpoints, None);
-        mesh.embed();
+        let space = Space::new(dim, 0., width);
+        let mesh = MeshBuilder::new(&space, &points, None).build();
         mesh.summary();
         //
         let _benefits = mesh.compute_benefits();
