@@ -20,4 +20,4 @@ Times needed to collect the 3 partitions:
   
 Using the *kmean* provided by the crate [clustering](https://crates.io/crates/clustering) we get a cost of 3.24 10^7 in  cpu time 3.74e4 and sys time(s) 2.31e4 for a partition of size 200.
 
-Nmi shows that the clusterization do not bring much segregation of data but our kmean cost is within 15% of the standard kmean at a negligible cost. 
+Nmi shows that the clusterization do not bring much segregation of data but our kmean cost is within 15% of the standard kmean at a negligible cpu  cost. 
