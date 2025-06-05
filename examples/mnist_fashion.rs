@@ -1,8 +1,8 @@
 //! To run the examples change the line :  
 //!
-//! const MNIST_DIGITS_DIR : &'static str = "/home/jpboth/Data/MNIST/";
+//! const MNIST_fashion_DIR : &'static str = "/home/jpboth/Data/MNIST/";
 //!
-//! to whatever directory you downloaded the [MNIST digits data](https://www.kaggle.com/datasets/hojjatk/mnist-dataset)
+//! to whatever directory you downloaded the [MNIST fashion data](https://www.kaggle.com/datasets/hojjatk/mnist-dataset)
 
 // use clap::{Arg, ArgAction, ArgMatches, Command};
 
@@ -18,33 +18,23 @@ use mnist::io::*;
 use nmi::*;
 
 // for data in old non csv format
-const MNIST_DIGITS_DIR_NOT_CSV: &str = "/home/jpboth/Data/ANN/MNIST";
+const MNIST_FASHION_DIR_NOT_CSV: &str = "/home/jpboth/Data/ANN/MNIST";
 
-// for data in csv format
-const MNIST_DIGITS_DIR_CSV: &str = "/home/jpboth/Data/MnistDigitsCsv";
-
-//====================================================================================
+//
 //
 
 pub fn main() {
     //
     let _ = env_logger::builder().is_test(true).try_init().unwrap();
 
-    let csv_format = false;
     //
-    let (labels, images_as_v) = if csv_format {
-        log::info!(
-            "in mnist_digits, reading mnist data original idx bianry ...from {}",
-            MNIST_DIGITS_DIR_CSV
-        );
-        io_from_csv(MNIST_DIGITS_DIR_CSV).unwrap()
-    } else {
-        log::info!(
-            "in mnist_digits, reading mnist data in CSV format ...from {}",
-            MNIST_DIGITS_DIR_NOT_CSV
-        );
-        io_from_non_csv(MNIST_DIGITS_DIR_NOT_CSV).unwrap()
-    };
+
+    log::info!(
+        "in mnist_fashion, reading mnist data in CSV format ...from {}",
+        MNIST_FASHION_DIR_NOT_CSV
+    );
+    let (labels, images_as_v) = io_from_non_csv(MNIST_FASHION_DIR_NOT_CSV).unwrap();
+
     //
     // define points
     //
@@ -100,13 +90,11 @@ pub fn main() {
         );
         //
         let refpoints = hcluster.get_points();
-        let output = Some("digits_centers.csv");
+        let output = Some("fashion_centers.csv");
         println!(
             "medoid l2 cost : {:.3e}",
             p.compute_cost_medoid_l2(&refpoints, output)
         );
-        let (_, kmean_cost) = p.compute_cluster_kmean_centers::<f32>(refpoints);
-        log::info!("kmeans cost : {:.3e}", kmean_cost);
         p.dump_cluster_id(Some(&labels));
         // merit comparison
         println!("merit ctatus");
@@ -117,15 +105,24 @@ pub fn main() {
         );
         contingency.dump_entropies();
         let nmi_joint: f64 = contingency.get_nmi_joint();
-        println!("mnist digits results with {} clusters", nb_cluster_asked[i]);
+        println!(
+            "mnist fashion results with {} clusters",
+            nb_cluster_asked[i]
+        );
         println!("mnit disgit nmi joint : {:.3e}", nmi_joint);
 
         let nmi_mean: f64 = contingency.get_nmi_mean();
-        println!("mnist digits results with {} clusters", nb_cluster_asked[i]);
+        println!(
+            "mnist fashion results with {} clusters",
+            nb_cluster_asked[i]
+        );
         println!("mnit disgit nmi mean : {:.3e}", nmi_mean);
 
         let nmi_sqrt: f64 = contingency.get_nmi_sqrt();
-        println!("mnist digits results with {} clusters", nb_cluster_asked[i]);
+        println!(
+            "mnist fashion results with {} clusters",
+            nb_cluster_asked[i]
+        );
         println!("mnit disgit nmi sqrt : {:.3e}", nmi_sqrt);
     }
 }

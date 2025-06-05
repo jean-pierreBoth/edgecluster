@@ -103,6 +103,7 @@ impl ClusterResult {
     where
         LabelId: Copy + Clone + std::fmt::Display,
     {
+        log::info!("\n dumping center id , label  cluster size");
         let mut nb_info = 1;
         for item in &self.cluster_center_to_pid {
             let rank = *item.key();

@@ -167,8 +167,6 @@ fn do_kmeans(points: &Vec<Point<f32>>, nb_iter: usize, nb_cluster: usize) {
     log::info!("doing do_kmeans comparison");
     // going to kmean
     log::info!("doing kmean clustering on whole data .... takes time");
-    let nb_iter = 50;
-    let nb_cluster = 200;
     let data_points: Vec<&[f32]> = points.iter().map(|p| p.get_position()).collect();
     //
     let cpu_start: ProcessTime = ProcessTime::now();
@@ -327,10 +325,12 @@ pub fn main() {
             "medoid l2 cost : {:.3e}",
             p.compute_cost_medoid_l2(&refpoints, output)
         );
-        p.dump_cluster_id(Some(&labels));
         //
         let (_, kmean_cost) = p.compute_cluster_kmean_centers::<f32>(refpoints);
-        log::info!("kmeans cost : {:.3e}", kmean_cost);
+        log::info!("\n kmeans cost : {:.3e}", kmean_cost);
+
+        p.dump_cluster_id(Some(&labels));
+
         // merit comparison
         println!("merit ctatus");
         // reference is first arg so it will correspond to rows
