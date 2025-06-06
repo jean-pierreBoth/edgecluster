@@ -533,6 +533,7 @@ where
         let nb_partitions = partitions_size.len();
         let mut res = Vec::<ClusterResult>::with_capacity(nb_partitions);
         for (i, nb_cluster) in partitions_size.iter().enumerate() {
+            log::info!("\n\n partition with nb cluster  : {}", nb_cluster);
             // rebuild point affectation for each partition
             let point_to_cluster: DashMap<usize, u32> = DashMap::<usize, u32>::new();
             let cluster_to_center_pid_for_this_partition = DashMap::<u32, usize>::new();

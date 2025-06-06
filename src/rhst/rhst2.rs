@@ -285,13 +285,9 @@ where
 
     // adds a point in cell
     fn add_point_rank(&mut self, point_rank: usize) {
-        /*         match self.points_in.as_mut() {
-            Some(points) => points.push(point),
-            None => {
-                let vec = vec![point];
-                self.points_in = Some(vec);
-            }
-        } */
+        if self.layer == 0 {
+            panic!("not licit for global cell");
+        }
         self.point_index.insert(point_rank);
     }
 
@@ -1049,7 +1045,7 @@ where
             let ref_cell = ref_cell_opt.unwrap();
             let unit_cell = ref_cell.value();
             if loop_min_size <= 100 && idx_l.len() <= 10 {
-                log::info!(
+                log::debug!(
                     "cell idx : {:?}, at layer : {}, benefit : {:.2e}, nb points : {}, id at finest layer : {:?}",
                     idx_l,
                     layer,
