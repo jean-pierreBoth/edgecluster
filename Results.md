@@ -5,10 +5,10 @@ Computations are done on a 32 threads cpu.
 ### Mnist Digits
 
 As we rescale mnist image to one pixel (division by 28*28) the cost given here have been reset by
-multiplying the code results by 784 to compare to kmedoids result.
+multiplying the code results by 784 to compare to kmedoids result.  
 Note that  kmedoids crate have images pixel divided by 256
 so they have been also reset by 256 to do comparisons. (See file [kmedoids](https://github.com/kno10/rust-kmedoids/blob/main/examples/mnist-kmedoids.rs))
-Moreover the cost are normalized by the size of the sample, 60000 for faster_pam and 70000 for edgecluster.
+Moreover the cost are normalized by the size of the sample, 60000 data corresponding to file *train-images-idx3-ubyte* for faster_pam and 70000 for edgecluster.
 
 ### par_fasterpam
 
@@ -51,6 +51,21 @@ Results are averaged on 5 runs.
 
 The dimension do not affect the result, but still reduces times.
 ### Song benchmark
+
+
+Data can be found at [UCI](https://archive.ics.uci.edu/dataset/203/yearpredictionmsd).
+It consists in 515345 vectors of dimension 90.
+
+| partition size | cost l2 (medoid) |
+| :------------: | :--------------: |
+|       10       |     9.49 10⁸     |
+|      100       |     8.18 10⁸     |
+|      1000      |     6.66 10⁸     |
+
+sys time 140s, cpu time 2900s.
+
+The results are slightly better than those in the original paper as we do one supplementary pass at the end of the algoritmm.
+We keep all medoids found and redispatch other points to nearest medoid.
 
 ### Higgs data
 

@@ -28,7 +28,7 @@ use csv;
 use edgecluster::rhst::*;
 use nmi::*;
 
-const SONG_DIR: &str = "/home/jpboth/Data/BenchClustering/";
+const SONG_DIR: &str = "/home/jpboth/Data/YEARMSD/";
 
 fn read_song_csv(
     fname: &str,
@@ -40,7 +40,7 @@ fn read_song_csv(
     let nb_var = nb_column - 1;
     let nb_record_to_read = 515344;
     let mut num_record: usize = 0;
-    let mut filepath = PathBuf::from("/home/jpboth/Data/BenchClustering");
+    let mut filepath = PathBuf::from(SONG_DIR);
     filepath.push(fname);
     let fileres = OpenOptions::new().read(true).open(&filepath);
     if fileres.is_err() {
@@ -144,56 +144,62 @@ fn main() {
     let sys_now = SystemTime::now();
     //
     //===================================
-    let nb_cluster_asked = 100;
+    let partitions_size = vec![100, 1000, 10000];
     let auto_dim = false;
     let _small_dim = Some(3);
-    let user_layer_max = None;
+    let user_layer_max = Some(16);
     //===================================
     //
     // cluster without specifying a dimension reducer
     let mut hcluster = Hcluster::new(&points, None);
     //
-    let cluster_res = hcluster.cluster_one(nb_cluster_asked, auto_dim, None, user_layer_max);
+    let cluster_res = hcluster.cluster(&partitions_size, auto_dim, None, user_layer_max);
     //
-    // We construct a corresponding Affectation structure to compare clusters with true labels
-    let ref_hashmap = DashMap::<usize, u32>::new();
-    for (i, l) in labels.iter().enumerate() {
-        ref_hashmap.insert(i, *l as u32);
+    for (i, p) in cluster_res.iter().enumerate() {
+        log::info!(" \n\n results with {} clusters", partitions_size[i]);
+        log::info!("\n ====================================================");
+        let algo_affectation = p.get_dash_affectation();
+        // We construct a corresponding Affectation structure to compare clusters with true labels
+        let ref_hashmap = DashMap::<usize, u32>::new();
+        for (i, l) in labels.iter().enumerate() {
+            ref_hashmap.insert(i, *l as u32);
+        }
+        let ref_affectation = DashAffectation::new(&ref_hashmap);
+        //
+        let cpu_time: Duration = cpu_start.elapsed();
+        println!(
+            "  sys time(ms) {:?} cpu time(ms) {:?}",
+            sys_now.elapsed().unwrap().as_millis(),
+            cpu_time.as_millis()
+        );
+        //
+        let refpoints = hcluster.get_points();
+        let output = Some("digits_centers.csv");
+        println!(
+            "medoid l2 cost : {:.3e}",
+            p.compute_cost_medoid_l2(&refpoints, output)
+        );
+        let (_, kmean_cost) = p.compute_cluster_kmean_centers::<f32>(refpoints);
+        log::info!("kmeans cost : {:.3e}", kmean_cost);
+        // p.dump_cluster_id(Some(&labels));
+        // merit comparison
+        println!("merit ctatus");
+        //
+        let contingency = Contingency::<DashAffectation<usize, u32>, usize, u32>::new(
+            ref_affectation,
+            algo_affectation,
+        );
+        contingency.dump_entropies();
+        let nmi_joint: f64 = contingency.get_nmi_joint();
+        println!("mnist digits results with {} clusters", partitions_size[i]);
+        println!("mnit disgit nmi joint : {:.3e}", nmi_joint);
+
+        let nmi_mean: f64 = contingency.get_nmi_mean();
+        println!("mnist digits results with {} clusters", partitions_size[i]);
+        println!("mnit disgit nmi mean : {:.3e}", nmi_mean);
+
+        let nmi_sqrt: f64 = contingency.get_nmi_sqrt();
+        println!("mnist digits results with {} clusters", partitions_size[i]);
+        println!("mnit disgit nmi sqrt : {:.3e}", nmi_sqrt);
     }
-    let ref_affectation = DashAffectation::new(&ref_hashmap);
-    let algo_affectation = cluster_res.get_dash_affectation();
-    let ref_points = hcluster.get_points();
-    //
-    let cpu_time: Duration = cpu_start.elapsed();
-    println!(
-        "  sys time(ms) {:?} cpu time(ms) {:?}",
-        sys_now.elapsed().unwrap().as_millis(),
-        cpu_time.as_millis()
-    );
-    //
-    let output = Some("song.csv");
-    println!(
-        "global cost : {:.3e}",
-        cluster_res.compute_cost_medoid_l2(&ref_points, output)
-    );
-    //
-    // merit comparison
-    println!("merit ctatus");
-    //
-    let contingency = Contingency::<DashAffectation<usize, u32>, usize, u32>::new(
-        ref_affectation,
-        algo_affectation,
-    );
-    contingency.dump_entropies();
-    let nmi_joint: f64 = contingency.get_nmi_joint();
-    println!("SONG results with {} clusters", nb_cluster_asked);
-    println!("SONG nmi joint : {:.3e}", nmi_joint);
-
-    let nmi_mean: f64 = contingency.get_nmi_mean();
-    println!("SONG results with {} clusters", nb_cluster_asked);
-    println!("SONG nmi mean : {:.3e}", nmi_mean);
-
-    let nmi_sqrt: f64 = contingency.get_nmi_sqrt();
-    println!("SONG results with {} clusters", nb_cluster_asked);
-    println!("SONG nmi sqrt : {:.3e}", nmi_sqrt);
 } // end of main

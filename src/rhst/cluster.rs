@@ -448,6 +448,8 @@ where
     /// - number of clusters asked for
     /// - auto_dim : set to true, the algorithm will try to reduce data dimension using module [crate::smalld]
     /// - if a reduction  to a given dimension is necessary, this option will use it.  
+    /// - user_layer_max: some times, as for Higgs of Song data we cannot reach one point by cell. (possibly points are duplicated)
+    ///   so it is useful to stop the number of layers when  the number of cells allocated do not increase anymore.
     ///
     /// The function returns a map giving for each point id its cluster
     pub fn cluster(
