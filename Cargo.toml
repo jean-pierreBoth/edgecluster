@@ -6,7 +6,7 @@ repository = "https://github.com/jean-pierreBoth/edgeclust"
 keywords = ["algorithms", "parallel-cluster"]
 documentation = "https://docs.rs/edgecluster"
 
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 

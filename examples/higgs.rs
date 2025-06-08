@@ -50,7 +50,7 @@ use ndarray::{Array2, ArrayView};
 use cpu_time::ProcessTime;
 use std::time::{Duration, SystemTime};
 
-use clustering::{kmeans, Elem};
+use clustering::{Elem, kmeans};
 
 use edgecluster::rhst::*;
 mod utils;
@@ -353,7 +353,7 @@ pub fn main() {
         //
         // detailed contingency analysis. Here we have reference indexed by rows in contingency table
         //
-        let labels = contingency.get_labels_rank(0);
+        let labels = contingency.get_labels_by_rank(0);
         let (nb_row, nb_col) = contingency.get_dim();
         log::info!("\n \n display rows entropies");
         let row_entropies = contingency.get_row_entropies();
