@@ -20,7 +20,7 @@ use num_traits::float::Float;
 use std::fmt::Debug;
 
 use anyhow::anyhow;
-use dashmap::{iter, mapref::one, rayon::*, DashMap};
+use dashmap::{DashMap, iter, mapref::one, rayon::*};
 use indexmap::IndexSet;
 use parking_lot::RwLock;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -207,7 +207,6 @@ where
     } // end of get_nb_point
 
     // returns an option on rank set
-    #[allow(unused)]
     pub(crate) fn get_points_set_ref(&self) -> Option<&IndexSet<usize>> {
         if self.layer > 0 {
             Some(&self.point_index)
@@ -218,7 +217,7 @@ where
 
     // makes an index for global cell
     #[allow(unused)]
-    fn get_point_set(&self) -> anyhow::Result<IndexSet<usize>> {
+    pub(crate) fn get_point_set(&self) -> anyhow::Result<IndexSet<usize>> {
         if self.get_layer() == 0 {
             let mut idx = IndexSet::<usize>::with_capacity(self.get_nb_points());
             for i in 0..self.all_points.len() {
@@ -242,23 +241,15 @@ where
         let v: Vec<usize> = match self.layer {
             0 => (0..self.all_points.len()).collect::<Vec<usize>>(),
             _ => self.point_index.iter().copied().collect(),
-            //
         };
         v
     }
-    #[allow(unused)]
     // returns true if a point is in sub tree of cell
     pub(crate) fn has_point(&self, pid: PointId) -> bool {
         if self.layer == 0 {
             true
         } else {
             self.point_index.contains(&pid)
-            /*             for p in self.points_in.as_ref().unwrap() {
-                if p.get_id() == pid {
-                    return true;
-                }
-            }
-            false */
         }
     }
     // get parent cell in splitting process
@@ -365,6 +356,40 @@ where
         }
         //
         Some(new_cells)
+    }
+
+    // check for equality/structure of points inside cell
+    pub(crate) fn cell_inertia(&self) -> (T, Vec<T>) {
+        log::debug!("in Cell::analyze_points_incell : {}", self.get_nb_points());
+        // first we check dispersion around mean (in fact check for equality)
+        // we loop in self.point_index
+        let dim = self.space.get_dim();
+        let mut center = vec![T::zero(); dim];
+        for idx in &self.point_index {
+            let p = self.all_points[*idx].get_position();
+            for i in 0..dim {
+                center[i] = center[i] + p[i];
+            }
+        }
+        let s: T = T::from(self.point_index.len()).unwrap();
+        for x in &mut center {
+            *x = *x / s;
+        }
+        //
+        let mut dist2 = T::zero();
+        for idx in &self.point_index {
+            let mut d2 = T::zero();
+            let p = self.all_points[*idx].get_position();
+            for i in 0..dim {
+                d2 = d2 + (p[i] - center[i]) * (p[i] - center[i]);
+            }
+            dist2 = dist2 + d2;
+        }
+        //
+        if log::log_enabled!(log::Level::Debug) && dist2.to_f64().unwrap() <= 0. {
+            log::info!("point inertia inside cell {:.5e}", dist2);
+        }
+        (dist2, center)
     }
 } // end of impl Cell
 
@@ -986,11 +1011,6 @@ where
         for _ in 0..self.get_nb_points() {
             clusters.push(RwLock::new(vec![u32::MAX; nb_partition]));
         }
-
-        /*         let clusters = DashMap::<PointId, Vec<u32>>::with_capacity(nb_points);
-        for point in self.points.as_ref().unwrap() {
-            clusters.insert(point.get_id(), vec![u32::MAX; nb_partition]);
-        } */
         // We build the all index set (needed for global cell)
         let mut all_point_index = IndexSet::<usize>::with_capacity(self.points.len());
         for i in 0..self.points.len() {
@@ -1235,6 +1255,38 @@ where
         }
     } // end dump_benefits
 
+    /// This function makes some checks on mesh. In particular
+    /// if a the mesh do not succeed to get one point cell after 31 levels it checks if there many equal points
+    /// in the cell
+    pub fn check_mesh(&self) {
+        assert!(self.get_nb_layers() > 0);
+        log::info!("in check_mesh");
+        // get last layer
+        let upper_layer_idx = self.get_nb_layers() - 1;
+        let upper_layer = self.get_layer(upper_layer_idx as u16);
+        let hcells_iter = upper_layer.get_hcells().into_iter();
+        let mut nb_1: i32 = 0;
+        let mut nb_zero_inertia: i32 = 0;
+        //
+        for item in hcells_iter {
+            let cell = item.value();
+            let nb_points_in = cell.get_nb_points();
+            if nb_points_in > 1 {
+                nb_1 += 1;
+                let (inertia, center) = cell.cell_inertia();
+                if inertia.to_f64().unwrap() <= 0. {
+                    nb_zero_inertia += 1;
+                    log::trace!("center : {:?}", center);
+                }
+            }
+        }
+        log::info!(
+            "nb cells with more than 1 point : {}, nb cells with identical points : {}",
+            nb_1,
+            nb_zero_inertia
+        );
+    } // end of check_mesh
+
     // we check we have a partition
     pub(crate) fn check_benefits_cover(&self, benefits: &Vec<BenefitUnit>)
     where
@@ -1251,11 +1303,11 @@ where
                 nb_points_in += cell.get_nb_points();
             } else {
                 log::error!(
-                "spacemesh benefit unit {:?}  cannot find its cell, up_idx : {:?}, nb_points found {}",
-                unit,
-                up_idx,
-                nb_points_in,
-            );
+                    "spacemesh benefit unit {:?}  cannot find its cell, up_idx : {:?}, nb_points found {}",
+                    unit,
+                    up_idx,
+                    nb_points_in,
+                );
                 panic!();
             }
         }

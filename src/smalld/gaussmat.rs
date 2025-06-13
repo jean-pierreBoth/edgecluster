@@ -50,23 +50,19 @@ where
         //
         let reduce_item = |item: &[T]| -> Vec<T> {
             let f: T = T::from(self.to_dim).unwrap().sqrt();
-            let small_item = (0..self.to_dim)
+            (0..self.to_dim)
                 .map(|i| {
                     self.gauss
                         .row(i)
                         .dot(&ArrayView1::from_shape(item.len(), item).unwrap())
                         / f
                 })
-                .collect();
-            small_item
+                .collect()
         };
         //
-        let reduced_data = data
-            .par_iter()
+        data.par_iter()
             .map(|item| reduce_item(item))
-            .collect::<Vec<Vec<T>>>();
-
-        reduced_data
+            .collect::<Vec<Vec<T>>>()
     }
 
     // array interface
@@ -74,32 +70,28 @@ where
         //
         let reduce_item = |item: &[T]| -> Array1<T> {
             let f: T = T::from(self.to_dim).unwrap().sqrt();
-            let small_item = (0..self.to_dim)
+            (0..self.to_dim)
                 .map(|i| {
                     self.gauss
                         .row(i)
                         .dot(&ArrayView1::from_shape(item.len(), item).unwrap())
                         / f
                 })
-                .collect();
-            small_item
+                .collect()
         };
         //
-        let reduced_data = data
-            .par_iter()
+        data.par_iter()
             .map(|item| reduce_item(item.as_slice().unwrap()))
-            .collect::<Vec<Array1<T>>>();
-        //
-        reduced_data
+            .collect::<Vec<Array1<T>>>()
     }
 } // end of impl Reduce
 
+#[cfg(test)]
 mod tests {
-    #![allow(unused)]
+    //    #![allow(unused)]
 
     use super::*;
 
-    use rand::distr::Distribution;
     use rand::distr::Uniform;
     use rand::prelude::*;
     use rand_xoshiro::Xoshiro256PlusPlus;
@@ -186,7 +178,7 @@ mod tests {
         }
 
         let mut data = Vec::<Array1<f64>>::new();
-        for i in 0..nb_test {
+        for _ in 0..nb_test {
             let mut arr1d = Array1::<f64>::zeros(from_dim);
             let scale = unif_range.sample(&mut rng);
             for i in 0..from_dim {

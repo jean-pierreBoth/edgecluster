@@ -13,7 +13,7 @@ use rand_distr::{Distribution, Normal, StandardNormal};
 
 use rayon::prelude::*;
 
-use lax::{layout::MatrixLayout, Lapack};
+use lax::{Lapack, layout::MatrixLayout};
 
 use super::reducer::Reducer;
 
@@ -125,7 +125,7 @@ impl<T> Reducer<T> for Romg<T>
 where
     T: 'static + Float + Send + Sync,
 {
-    //
+    // reduce dimension of vectors
     fn reduce(&self, data: &[&[T]]) -> Vec<Vec<T>> {
         //
         let reduce_item = |v: &[T]| -> Vec<T> {
@@ -135,21 +135,17 @@ where
             v.to_vec()
         };
 
-        let reduced = data
-            .par_iter()
+        data.par_iter()
             .map(|item| reduce_item(item))
-            .collect::<Vec<Vec<T>>>();
-        //
-        reduced
+            .collect::<Vec<Vec<T>>>()
     }
 
+    // reduce dimension of a slice of arrays
     fn reduce_a(&self, data: &[&Array1<T>]) -> Vec<Array1<T>> {
-        let reduced = data
-            .par_iter()
+        data.par_iter()
             .map(|item| self.mat_reducer.dot(*item))
-            .collect::<Vec<Array1<T>>>();
+            .collect::<Vec<Array1<T>>>()
         //
-        reduced
     }
 }
 

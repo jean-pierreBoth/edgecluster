@@ -513,6 +513,7 @@ where
         }
         //
         spacemesh.summary();
+        spacemesh.check_mesh();
 
         let mut filtered_benefits = spacemesh.compute_benefits();
         if log::log_enabled!(log::Level::Trace) {
@@ -645,7 +646,9 @@ where
         let norm_f64 = norm.into_inner();
         log::info!(
             "HCluster compute_cost_medoid_l2 cost without reaffectation : {:.3e}, nb change of affectation : {}, cost after reaffectation : {:.3e}",
-            without_reaffectation_norm.into_inner(), nb_changed, norm_f64
+            without_reaffectation_norm.into_inner(),
+            nb_changed,
+            norm_f64
         );
         //
         (new_affectation, norm_f64)
