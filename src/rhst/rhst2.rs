@@ -387,7 +387,14 @@ where
         }
         //
         if log::log_enabled!(log::Level::Debug) && dist2.to_f64().unwrap() <= 0. {
-            log::info!("point inertia inside cell {:.5e}", dist2);
+            log::info!("\n\n point inertia inside cell {:.5e}", dist2);
+            for idx in &self.point_index {
+                log::info!(
+                    "idx : {}, label : {}",
+                    idx,
+                    self.all_points[*idx].get_label()
+                )
+            }
         }
         (dist2, center)
     }

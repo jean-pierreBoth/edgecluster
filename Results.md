@@ -96,3 +96,9 @@ Using the *kmean* provided by the Julia package [clustering](https://juliastats.
 
 
 Our kmean cost is within 15% for the partiton size 10, and within 25, 30% for the partitions size of 100 ans 200 but these are obtained at no cost. The nmi are not good but Higgs data are not clusterizable
+
+#### Another remark
+
+The reason why it is impossible to reach one point by cell even with 31 layers is that Higgs data have 270520 cells with 2 identical points.
+**The duplicated points have all label 0**. This can be checked by running example *higgs.rs* with RUST_LOG=debug. (You will get
+a large dump!!) The are about 4500 cells with more than one point but where all points are not identical.
