@@ -86,10 +86,9 @@ We keep all medoids found and redispatch other points to nearest medoid.
 ### Higgs data
 
 We used 3 clustering sizes : 10, 100 and 200.
-For each size we compute Nmi (sqrt) as provided by  crate[coreset](https://crates.io/crates/coreset) medoid l2 cost.
+For each size we compute Nmi (sqrt) as provided by  crate [coreset](https://crates.io/crates/coreset) medoid l2 cost.
 
 
-TODO: rappeler les definitions (sqrt/pas sqrt)
 
 | partition size | cost l2 (medoid) |      nmi      |
 | :------------: | :--------------: | :-----------: |
@@ -103,8 +102,8 @@ Times needed to collect the 3 partitions:
   
 The nmi are not good but Higgs data are not clusterizable.
 
-Using the *kmean* provided by the Julia package [clustering](https://juliastats.org/Clustering.jl/stable/algorithms.html) we get a cost (inertia) of 1.53 10^8 in  cpu time of 304s and sys time of 64s for the partition of size 200.
-We also an extrapolated l2 cost (inertia) to barycenter of each cluster defined by medoids as in kmean to see how far a cost computed from medoid affectation can be from standard *kmean* result.
+We used the *kmean* provided by the Julia package [clustering](https://juliastats.org/Clustering.jl/stable/algorithms.html) to compute l2 cost (**inertia**) for for the 3 partiton sizes.  
+We also computed an extrapolated kmean cost (inertia) by computing inertia of dispatching points to barycenter of each cluster defined by medoids as in kmean to see how far a cost computed from medoid affectation can be from standard *kmean* result.
 
 | partition size | kmean inertia (Julia) | cpu(s), sys(s) | cost l2 extrapolated |
 | :------------: | :-------------------: | :------------: | :------------------: |
@@ -114,7 +113,7 @@ We also an extrapolated l2 cost (inertia) to barycenter of each cluster defined 
 
 We see that: 
 - the times required by this kmedoid algorithm is comparable to the kmean++ algorithm provided by Julia. Moreover *kmean* was marked as converged only for partion size 10.
-- The kmean cost we extrapolate from the mdeoids is within 15% for the partiton size 10, and within 25, 30% for the partitions size of 100 ans 200 but these are obtained at no cost. 
+- The kmean cost we extrapolate from the medoids is within 15% for the partiton size 10, and within 25, 30% for the partitions size of 100 ans 200 but these are obtained at no cost. 
 
 #### Another remark
 
