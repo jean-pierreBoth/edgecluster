@@ -50,10 +50,10 @@ env_logger = { version = "0.11" }
 
 # for mnist io
 # mnist = { path = "../coreset/mnist"}
-mnist = { git = "https://github.com/jean-pierreBoth/coreset" }
-#mnist = { path = "../coreset/mnist" }
+# mnist = { git = "https://github.com/jean-pierreBoth/coreset" }
 
-nmi = { git = "https://github.com/jean-pierreBoth/coreset" }
+nmi = { version = "0.1"}
+# nmi = { git = "https://github.com/jean-pierreBoth/coreset" }
 #nmi = { path = "../coreset/nmi"}
 
 

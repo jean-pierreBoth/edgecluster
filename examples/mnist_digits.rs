@@ -14,8 +14,8 @@ use std::time::{Duration, SystemTime};
 
 use edgecluster::rhst::*;
 mod utils;
-use mnist::io::*;
 use nmi::*;
+use utils::mnistio::*;
 
 // for data in old non csv format
 const MNIST_DIGITS_DIR_NOT_CSV: &str = "/home/jpboth/Data/ANN/MNIST";

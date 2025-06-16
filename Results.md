@@ -19,7 +19,7 @@ Moreover the cost are normalized by the size of the sample, 60000 data correspon
 |       25       |          1725, 1725          |
 
 
-**faster_pam times do not take into account the time needed to computes distances**
+**faster_pam times mentionned do not take into account the time needed to computes distances**
 
 ### Without dimension reduction
 
@@ -50,6 +50,22 @@ Results are averaged on 5 runs.
 |       25       |       1921       | 0.35  |
 
 The dimension do not affect the result, but still reduces times.
+
+### Mnist Fashion
+
+As for Digits data, we rescale mnist image to one pixel (division by 28*28) the cost given here have been reset by
+multiplying the code results by 784
+
+### Without dimension reduction
+
+Results are averaged on 5 runs.
+
+| partition size | cost l2 (medoid) | nmi , $\sigma$ |
+| :------------: | :--------------: | :------------: |
+|       10       |       1958       | 0.39 +- 0.038  |
+|       15       |       1841       | 0.42 +- 0.028  |
+|       25       |       1703       | 0.46 +- 0.016  |
+
 ### Song benchmark
 
 
@@ -71,31 +87,34 @@ We keep all medoids found and redispatch other points to nearest medoid.
 
 We used 3 clustering sizes : 10, 100 and 200.
 For each size we compute Nmi (sqrt) as provided by  crate[coreset](https://crates.io/crates/coreset) medoid l2 cost.
-We also compute a l2 cost (inertia) to barycenter of each cluster as in kmean to see how far a cost computed from medoid affectation can be of standard result.
+
 
 TODO: rappeler les definitions (sqrt/pas sqrt)
 
-| partition size | cost l2 (medoid) | cost l2 (kmean) |      nmi      |
-| :------------: | :--------------: | :-------------: | :-----------: |
-|       10       |   5.16  $10^7$   |  1.78 $10^{8}$  | 6.0 $10^{-4}$ |
-|      100       |   4.64  $10^7$   |  1.39 $10^{8}$  | 5.0 $10^{-3}$ |
-|      200       |   4.52  $10^7$   |  1.31 $10^{8}$  | 6.0 $10^{-3}$ |
+| partition size | cost l2 (medoid) |      nmi      |
+| :------------: | :--------------: | :-----------: |
+|       10       |   5.16  $10^7$   | 6.0 $10^{-4}$ |
+|      100       |   4.64  $10^7$   | 5.0 $10^{-3}$ |
+|      200       |   4.52  $10^7$   | 6.0 $10^{-3}$ |
 
 Times needed to collect the 3 partitions:
 - cpu(s) : 2943
 - sys(s) : 267
   
+The nmi are not good but Higgs data are not clusterizable.
+
 Using the *kmean* provided by the Julia package [clustering](https://juliastats.org/Clustering.jl/stable/algorithms.html) we get a cost (inertia) of 1.53 10^8 in  cpu time of 304s and sys time of 64s for the partition of size 200.
+We also an extrapolated l2 cost (inertia) to barycenter of each cluster defined by medoids as in kmean to see how far a cost computed from medoid affectation can be from standard *kmean* result.
 
+| partition size | kmean inertia (Julia) | cpu(s), sys(s) | cost l2 extrapolated |
+| :------------: | :-------------------: | :------------: | :------------------: |
+|       10       |     1.53 $10^{8}$     |    304, 68     |    1.78 $10^{8}$     |
+|      100       |     1.11 $10^{8}$     |   2280, 770    |    1.39 $10^{8}$     |
+|      200       |    0.998  $10^{8}$    |   4400, 1540   |    1.31 $10^{8}$     |
 
-| partition size |  kmean inertia  | cpu(s), sys(s) |
-| :------------: | :-------------: | :------------: |
-|       10       |  1.53 $10^{8}$  |    304, 68     |
-|      100       |  1.11 $10^{8}$  |   2280, 770    | unconverged |
-|      200       | 0.998  $10^{8}$ |   4400, 1540   |
-
-
-Our kmean cost is within 15% for the partiton size 10, and within 25, 30% for the partitions size of 100 ans 200 but these are obtained at no cost. The nmi are not good but Higgs data are not clusterizable
+We see that: 
+- the times required by this kmedoid algorithm is comparable to the kmean++ algorithm provided by Julia. Moreover *kmean* was marked as converged only for partion size 10.
+- The kmean cost we extrapolate from the mdeoids is within 15% for the partiton size 10, and within 25, 30% for the partitions size of 100 ans 200 but these are obtained at no cost. 
 
 #### Another remark
 

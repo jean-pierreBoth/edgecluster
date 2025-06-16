@@ -14,11 +14,11 @@ use std::time::{Duration, SystemTime};
 
 use edgecluster::rhst::*;
 mod utils;
-use mnist::io::*;
 use nmi::*;
+use utils::mnistio::*;
 
 // for data in old non csv format
-const MNIST_FASHION_DIR_NOT_CSV: &str = "/home/jpboth/Data/ANN/MNIST";
+const MNIST_FASHION_DIR_NOT_CSV: &str = "/home/jpboth/Data/ANN/Fashion-MNIST";
 
 //
 //
@@ -39,10 +39,6 @@ pub fn main() {
     // define points
     //
     log::info!("start...");
-    let ranks: Vec<usize> = vec![46046, 19917];
-    for r in ranks {
-        log::info!("point : {}, label : {}", r, labels[r]);
-    }
     let points: Vec<Point<f32>> = (0..labels.len())
         .map(|i| Point::<f32>::new(i, images_as_v[i].clone(), labels[i] as u32))
         .collect();
@@ -65,7 +61,7 @@ pub fn main() {
     //===================================
     let nb_cluster_asked = vec![10, 15, 25];
     let auto_dim = false;
-    let _small_dim = Some(3);
+    let _small_dim = None;
     let user_layer_max = None;
     //===================================
     // cluster without specifying a dimension reducer
@@ -109,20 +105,20 @@ pub fn main() {
             "mnist fashion results with {} clusters",
             nb_cluster_asked[i]
         );
-        println!("mnit disgit nmi joint : {:.3e}", nmi_joint);
+        println!("mnit fashion nmi joint : {:.3e}", nmi_joint);
 
         let nmi_mean: f64 = contingency.get_nmi_mean();
         println!(
             "mnist fashion results with {} clusters",
             nb_cluster_asked[i]
         );
-        println!("mnit disgit nmi mean : {:.3e}", nmi_mean);
+        println!("mnist fashion nmi mean : {:.3e}", nmi_mean);
 
         let nmi_sqrt: f64 = contingency.get_nmi_sqrt();
         println!(
             "mnist fashion results with {} clusters",
             nb_cluster_asked[i]
         );
-        println!("mnit disgit nmi sqrt : {:.3e}", nmi_sqrt);
+        println!("mnit fashion nmi sqrt : {:.3e}", nmi_sqrt);
     }
 }
